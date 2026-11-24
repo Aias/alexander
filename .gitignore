@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+# working material that stays local
+photos/
+refs/
+samples/
+out/
+out2/
+sheets/
+dataroom/
+*.zip
