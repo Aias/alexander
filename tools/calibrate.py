@@ -42,7 +42,7 @@ print(f"   at 4.2 um pixels (48 MP on 35mm): per-pixel sd {D.std():.3f} density,
 # 2. Sharpness: sinusoidal exposures through emulsion blur and development
 print("2. sharpness of the developed negative against the datasheet curve")
 um = 1.5
-p = twb2.parser().parse_args(["x", "-o", "x", "--grain", "0"])
+p = twb2.parser().parse_args(["x", "-o", "x", "--grain", "0", "--lens-um", "0"])   # the datasheet describes the film alone
 cx, cy = twb2.film_curve(p.dev)
 base = cy.min()
 x = np.arange(4096) * um / 1000.0                                  # mm

@@ -342,10 +342,11 @@ def parser():
                    help="long edge of the piece of film the picture fills: 36 = a whole 35mm frame, 24 = a "
                         "moderate crop of one (default), 18 = half-frame, 56 = 6x4.5")
     g.add_argument("--filter", choices=sorted(TRIX["rgb_weights"]), default="none", help="lens filter")
-    g.add_argument("--lens-um", type=float, default=0.0,
+    g.add_argument("--lens-um", type=float, default=5.0,
                    help="softness of the picture on the film, as a blur radius in micrometres: lens, focus, "
                         "camera movement and losses from copying. Applied before development, so grain is "
-                        "not softened. 0 is off; the reference scans sit between 10 and 30 [tuned]")
+                        "not softened. 0 is off; the reference scans, at the size of a book page, sit "
+                        "between 10 and 30 [tuned]")
     g.add_argument("--ev", type=float, default=0.0, help="exposure in stops")
     g.add_argument("--auto-ev", type=float, nargs="?", const=0.45, default=None, metavar="TARGET")
     g.add_argument("--dev", type=float, default=7.0, help="development time in minutes, 6 to 11 (longer = more contrast)")
