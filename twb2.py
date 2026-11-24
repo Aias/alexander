@@ -73,13 +73,16 @@ APERTURE_UM2 = math.pi * 24.0 ** 2   # the 48 um aperture granularity is quoted 
 FILM_DMAX = 3.4              # net density the emulsion can reach (top of the datasheet's granularity plot)
 GRAIN_UNIFORMITY = 0.6       # black-and-white value used by spektrafilm
 PAPER_CREAM = (0.957, 0.937, 0.882)   # display colour of the uncoated stock [tuned]
-# The tone range the book's picture pages share: display values at these percentiles of a
-# page, measured from scans of twelve pages. The darkest tenth and quarter sit within a few
-# hundredths of the same values on every page; their medians are 0.12 and 0.24, and the two
-# values used here are the lower quartile across pages, chosen by eye with the pages alongside
-# so that buildings keep a little more depth in their shadows. The rest are medians.
-HOUSE_PCT = (2, 10, 25, 50, 75, 90, 98)
-HOUSE_VAL = (0.08, 0.11, 0.22, 0.55, 0.78, 0.95, 1.00)
+# The tone range the book's picture pages share, measured from scans of twelve pages as
+# display values at percentiles of a page. Two things hold from page to page and are used
+# here: where the shadows sit (the darkest tenth and quarter vary by only a few hundredths;
+# their medians are 0.12 and 0.24, and the values used are the lower quartile, chosen by eye
+# with the pages alongside so that buildings keep some depth), and that the lightest tenth
+# reaches paper white. The middle of the range differs widely between pages, so the
+# picture keeps its own there.
+HOUSE_PCT = (2, 10, 25, 90, 98)
+HOUSE_VAL = (0.08, 0.11, 0.22, 0.95, 1.00)
+HOUSE_MAX_SLOPE = 2.0        # the copy never stretched tones much; one matched pair measures 1.6
 
 
 # ---------- colour and file handling -------------------------------------------
@@ -273,8 +276,9 @@ def film_exposure(rgb, p, weights=None):
     return E * F(2.0 ** ev)
 
 
-def expose_and_develop(rgb, p, um, rng):
-    """Linear RGB -> net density of the developed negative, grain included."""
+def expose_and_develop(rgb, p, um, rng, keep_clean=False):
+    """Linear RGB -> net density of the developed negative, grain included. With
+    `keep_clean` the grain-free density is returned as well."""
     E = film_exposure(rgb, p)
     # softness of the image that reaches the film, then light scatter in the emulsion.
     # Both act on light before development, so grain stays crisp over the softened picture
@@ -319,10 +323,11 @@ def expose_and_develop(rgb, p, um, rng):
         D = (np.interp(logH, cx, cy) - base).astype(F)
     del logH
 
+    clean = D if keep_clean else None
     if p.grain > 0:
         D = add_grain(D, um, p.grain * development_grain(p), rng)
 
-    return D, ref
+    return (D, ref, clean) if keep_clean else (D, ref)
 
 
 # ---------- the print ---------------------------------------------------------------
@@ -419,17 +424,23 @@ def copied_from_page(R, p, long_edge):
 
 def house_tones(R, strength):
     """Pull a picture's tones toward the range the book's pages share. The book's makers
-    copied every source to a common look: a pale picture gained contrast and a dark one was
-    lightened. Here the picture's own percentiles are moved part of the way (`strength`, 0 to
-    1) to the book's, along a smooth curve that keeps their order."""
+    copied every source to a common look: shadows opened to a set level and the lightest
+    tones taken to paper white. The picture's own percentiles are moved toward the book's
+    (`strength`, 0 to 1) along a smooth curve that keeps their order. No part of the scale
+    is stretched by more than HOUSE_MAX_SLOPE, so grain is not blown up where a picture's
+    tones bunch together, and the light end is compressed toward white, where the book's
+    pages are cleanest."""
     v = lin_to_srgb(np.clip(R, 0.0, 1.0))
     own = np.percentile(v[::3, ::3], HOUSE_PCT)
     want = (1.0 - strength) * own + strength * np.array(HOUSE_VAL)
     xs, ys = [0.0], [0.0]
     for x, y in zip(own, want):
-        if x - xs[-1] > 0.01 and x < 0.99:               # skip percentiles that sit on the black floor or on white
-            xs.append(float(x)); ys.append(float(max(y, ys[-1] + 1e-4)))
+        if x - xs[-1] > 0.005 and x < 0.995:             # skip percentiles sitting on the black floor or on white
+            xs.append(float(x)); ys.append(float(y))
     xs.append(1.0); ys.append(1.0)
+    for i in range(1, len(xs)):                          # limit the stretch, working up from black
+        ys[i] = min(ys[i], ys[i - 1] + HOUSE_MAX_SLOPE * (xs[i] - xs[i - 1]))
+        ys[i] = max(ys[i], ys[i - 1] + 1e-4)
     return srgb_to_lin(np.clip(PchipInterpolator(xs, ys)(v), 0.0, 1.0)).astype(F)
 
 
@@ -488,9 +499,19 @@ def render(rgb, p):
     um = p.film_mm * 1000.0 / long_edge             # size of one pixel on the film
     mm = page_mm / long_edge                        # size of one pixel on the page
     rng = np.random.default_rng(p.seed)
-    D, ref = expose_and_develop(rgb, p, um, rng)
+    soften = p.grain > 0 and p.grain_light < 1.0
+    D, ref, D0 = expose_and_develop(rgb, p, um, rng, keep_clean=True)
     del rgb
     R = print_on_paper(D, ref, p, um)
+    if soften:
+        # The book's pages carry less grain in their light tones than a straight print does.
+        # Grain is the difference between the print and the same print made without it; that
+        # difference is scaled down where the picture is light.
+        v0 = lin_to_srgb(print_on_paper(D0, ref, p, um))
+        keep = 1.0 - (1.0 - p.grain_light) * smoothstep(0.35, 0.55, v0)
+        R = srgb_to_lin(np.clip(v0 + keep * (lin_to_srgb(R) - v0), 0.0, 1.0)).astype(F)
+        del v0, keep
+    del D, D0
     solid = 0.0
     if p.repro == "copy":
         R = copied_from_page(R, p, long_edge)
@@ -578,6 +599,10 @@ def parser():
                         "longer = more contrast), or a period's recommended development: norm-1952, "
                         "norm-1956 or norm-1981. A longer development wants a softer --grade")
     g.add_argument("--grain", type=float, default=1.0, help="granularity relative to the film's datasheet figure")
+    g.add_argument("--grain-light", type=float, default=0.6,
+                   help="grain kept in the light tones of the print, relative to a straight print (1). "
+                        "The default brings the fall-off from dark mid-tones to light ones close to the "
+                        "one measured on the book's pages [tuned against scans]")
     g.add_argument("--grain-dev", type=float, default=1.3,
                    help="how granularity grows with development: the power of the negative's contrast it "
                         "follows. 1.3 is the value measured on Double-X (default); 0 leaves it fixed")
