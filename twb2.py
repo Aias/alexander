@@ -430,10 +430,10 @@ def parser():
                         "camera movement and losses from copying. Applied before development, so grain is "
                         "not softened. 0 is off; the reference scans, at the size of a book page, sit "
                         "between 10 and 30 [tuned]")
-    g.add_argument("--lens-exponent", type=float, default=2.0,
+    g.add_argument("--lens-exponent", type=float, default=1.15,
                    help="shape of that softness. 2 is a Gaussian; lower values keep a sharp core and add a "
                         "long faint skirt, which lowers the contrast of middle-sized detail and keeps fine "
-                        "edges. Published film sharpness curves sit near 1.15")
+                        "edges. Published film sharpness curves sit near 1.15, the default")
     g.add_argument("--halation", type=float, default=0.0,
                    help="light reflected back from the film base as a wide glow around bright areas, as a "
                         "fraction of the light. 0 is off; 0.02 to 0.08 covers films with weak "
@@ -445,10 +445,10 @@ def parser():
     g.add_argument("--dev", type=float, default=7.0, help="development time in minutes, 6 to 11 (longer = more contrast)")
     g.add_argument("--grain", type=float, default=1.0, help="granularity relative to the datasheet's 17")
     g.add_argument("--edge", type=float, default=1.0, help="edge-effect strength relative to the datasheet fit")
-    g.add_argument("--edge-density", type=float, default=1.0,
-                   help="how edge effects grow with the density of the negative. 1 follows Nelson's "
-                        "measurement (the change at an edge is proportional to the density as well as to "
-                        "the difference across it); 0 uses the difference alone")
+    g.add_argument("--edge-density", type=float, default=0.0,
+                   help="how edge effects grow with the density of the negative. 0 uses the difference "
+                        "across an edge alone (default, preferred in blind comparison); 1 follows Nelson's "
+                        "measurement, in which the change is also proportional to the density")
     g.add_argument("--no-edge", action="store_true", help="switch development edge effects off")
     g = ap.add_argument_group("print (Kodak Polymax Fine-Art)")
     g.add_argument("--grade", type=float, default=3.0, help="paper grade, -1 to 5")

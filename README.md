@@ -21,7 +21,10 @@ python3 twb2.py photo.jpg -o out.png --auto-ev
 ```
 
 That renders a darkroom print: a slightly soft image on the negative, developed, with
-grain, printed on grade 3 paper, saved at the size of the input. Add `--out-long-edge 5120` to save at a chosen size.
+grain, printed on grade 3 paper, saved at the size of the input.
+
+The softness shape, the edge-effect rule and the optional stages were chosen by blind
+comparison of renders. Add `--out-long-edge 5120` to save at a chosen size.
 
 Useful switches:
 
@@ -32,13 +35,13 @@ Useful switches:
 | `--print-ev` | Print exposure in stops; more is darker | -0.5 |
 | `--detail-px` | Long edge of the grid the film and print are simulated on before enlarging. Lower is coarser and softer; 0 uses the input's own size | 2560 |
 | `--lens-um` | Softness of the picture on the film, as a blur radius in micrometres. It acts before development, so grain stays crisp over the softened picture. 0 is off; the reference scans, at the size of a book page, sit between 10 and 30 | 5 |
-| `--lens-exponent` | Shape of that softness. 2 is a Gaussian. Lower values keep a sharp core and add a long faint skirt; published film sharpness curves sit near 1.15 | 2 |
+| `--lens-exponent` | Shape of that softness. 2 is a Gaussian. Lower values keep a sharp core and add a long faint skirt; published film sharpness curves sit near 1.15 | 1.15 |
 | `--halation` | Light reflected back from the film base as a wide glow around bright areas, as a fraction of the light. 0.02 to 0.08 covers films with weak protection against it | 0 (off) |
 | `--film-mm` | Long edge of the piece of film the picture fills: 36 is a whole 35mm frame, 18 is half-frame, 56 is medium format. Smaller means more grain | 24 |
 | `--dev` | Development time in minutes, 6 to 11; longer is more contrast | 7 |
 | `--grain` | Granularity relative to the datasheet figure | 1.0 |
 | `--edge`, `--no-edge` | Strength of development edge effects | 1.0 |
-| `--edge-density` | How edge effects grow with the density of the negative. 1 follows Nelson's measurement; 0 uses the tone difference alone | 1 |
+| `--edge-density` | How edge effects grow with the density of the negative. 0 uses the tone difference alone; 1 follows Nelson's measurement, which makes fringes stronger in the light parts of the picture | 0 |
 | `--filter` | Lens filter: `none`, `yellow`, `orange`, `red` | none |
 | `--repro copy` | Shows the print as it looks after being printed in a book, re-photographed from the page and printed again, which is how the book's own pictures were made. Tuned with `--copy-blur`, `--copy-gain`, `--copy-drop`, `--copy-fill` | off |
 | `--repro book` | Adds the 1979 printing press: weak ink, tone compression, dot gain, softness | off |
@@ -53,16 +56,16 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 
 1. **Colour response.** The photo is weighted by Tri-X's spectral sensitivity, which is
    strong in blue. Blue skies come out pale unless a filter is chosen.
-   The image is then softened slightly, as a lens and a film do. With `--lens-exponent`
-   below 2 the softness has a sharp core and a long skirt, and `--halation` adds the glow
-   of light reflected from the back of the film.
+   The image is then softened slightly, as a lens and a film do. The softness has a sharp
+   core and a long faint skirt (`--lens-exponent 2` makes it a plain Gaussian), and
+   `--halation` adds the glow of light reflected from the back of the film.
 2. **Film curve.** Exposure becomes density along the Tri-X characteristic curve for the
    chosen development time. A metered grey is placed where an ISO 400 exposure puts it.
 3. **Edge effects.** Dense areas hold back development nearby, which lifts contrast at
    edges and in small details. Applied to exposure before the curve, so it fades in
-   blocked shadows and blown highlights. The change at an edge grows with the density of
-   the negative as well as with the difference across the edge, so fringes are stronger in
-   the light parts of the picture than in its shadows.
+   blocked shadows and blown highlights. With `--edge-density 1` the change at an edge
+   also grows with the density of the negative, as Nelson measured, so fringes are
+   stronger in the light parts of the picture than in its shadows.
 4. **Grain.** Each cell of the simulation grid holds a number of grains that follows from
    its area on the film. The number developed is drawn from a Poisson distribution. No
    texture is added and no noise is filtered: grain strength comes from the film format
