@@ -41,7 +41,7 @@ Useful switches:
 | `--film-mm` | Long edge of the piece of film the picture fills: 36 is a whole 35mm frame, 18 is half-frame, 56 is medium format. Smaller means more grain | 24 |
 | `--dev` | Development time in minutes (Tri-X 6 to 11, Double-X 4 to 12); longer is more contrast. Or a period's recommended development: `norm-1952`, `norm-1956`, `norm-1981`. A longer development wants a softer `--grade` | 7 (Double-X 6) |
 | `--grain` | Granularity relative to the datasheet figure | 1.0 |
-| `--grain-dev` | How granularity grows with development: the power of the negative's contrast it follows. 1.3 is the value measured on Double-X | 0 (fixed) |
+| `--grain-dev` | How granularity grows with development: the power of the negative's contrast it follows. 1.3 is the value measured on Double-X; 0 leaves it fixed | 1.3 |
 | `--edge`, `--no-edge` | Strength of development edge effects | 1.0 |
 | `--edge-density` | How edge effects grow with the density of the negative. 0 uses the tone difference alone; 1 follows Nelson's measurement, which makes fringes stronger in the light parts of the picture | 0 |
 | `--filter` | Lens filter: `none`, `yellow`, `orange`, `red` | none |
@@ -73,8 +73,9 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 4. **Grain.** Each cell of the simulation grid holds a number of grains that follows from
    its area on the film. The number developed is drawn from a Poisson distribution. No
    texture is added and no noise is filtered: grain strength comes from the film format
-   and its apparent size from the grid. With `--grain-dev` the granularity also rises
-   with development, as measured on real film.
+   and its apparent size from the grid. Granularity also rises with development, as
+   measured on real film: at the default 7 minutes it is about 10% above the datasheet
+   figure, which is quoted for a shorter development.
 5. **Print.** The negative is printed on Kodak Polymax paper of the chosen grade.
 6. **House tones (optional).** The book's makers copied every source to a common look:
    a pale picture gained contrast and a dark one was lightened. `--house` moves the

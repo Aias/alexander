@@ -576,9 +576,9 @@ def parser():
                         "longer = more contrast), or a period's recommended development: norm-1952, "
                         "norm-1956 or norm-1981. A longer development wants a softer --grade")
     g.add_argument("--grain", type=float, default=1.0, help="granularity relative to the film's datasheet figure")
-    g.add_argument("--grain-dev", type=float, default=0.0,
+    g.add_argument("--grain-dev", type=float, default=1.3,
                    help="how granularity grows with development: the power of the negative's contrast it "
-                        "follows. 0 leaves it fixed; 1.3 is the value measured on Double-X")
+                        "follows. 1.3 is the value measured on Double-X (default); 0 leaves it fixed")
     g.add_argument("--edge", type=float, default=1.0, help="edge-effect strength relative to the datasheet fit")
     g.add_argument("--edge-density", type=float, default=0.0,
                    help="how edge effects grow with the density of the negative. 0 uses the difference "
