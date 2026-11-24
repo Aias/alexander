@@ -47,7 +47,8 @@ Useful switches:
 | `--edge`, `--no-edge` | Strength of development edge effects | 1.0 |
 | `--edge-density` | How edge effects grow with the density of the negative. 0 uses the tone difference alone; 1 follows Nelson's measurement, which makes fringes stronger in the light parts of the picture | 0 |
 | `--filter` | Lens filter: `none`, `yellow`, `orange`, `red` | none |
-| `--house` | Pulls the picture's tones toward the range the book's own pages share, from 0 (a straight darkroom print) to 1 (matched). The book's pages keep their shadows more open than a straight print | 1 |
+| `--house` | Sets the picture's shadows and white point to those the book's own pages share, from 0 (a straight darkroom print) to 1 (matched). The book's pages keep their shadows more open than a straight print | 1 |
+| `--grain-light` | Grain kept in the light tones, relative to a straight print. The book's pages are cleaner in their light tones | 0.6 |
 | `--repro copy` | Shows the print as it looks after being printed in a book, re-photographed from the page and printed again, which is how the book's own pictures were made. Tuned with `--copy-blur`, `--copy-gain`, `--copy-drop`, `--copy-fill` | off |
 | `--repro book` | Adds the 1979 printing press: weak ink, tone compression, dot gain, softness | off |
 | `--view page` | With `--repro book`, shows true ink on cream paper | off |
@@ -56,6 +57,9 @@ Useful switches:
 A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 
 `python3 twb2.py --help` lists everything.
+
+The research behind every stage, its sources and the decisions taken are written up in
+[docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## What each stage does
 
@@ -77,11 +81,13 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
    texture is added and no noise is filtered: grain strength comes from the film format
    and its apparent size from the grid. Granularity also rises with development, as
    measured on real film: at the default 7 minutes it is about 10% above the datasheet
-   figure, which is quoted for a shorter development.
+   figure, which is quoted for a shorter development. In the light tones of the print it
+   is scaled down, as the book's pages show less grain there than a straight print does.
 5. **Print.** The negative is printed on Kodak Polymax paper of the chosen grade.
 6. **House tones.** The book's makers copied every source to a common look:
-   a pale picture gained contrast and a dark one was lightened. `--house` moves the
-   picture's own tone percentiles part of the way to the book's, along a smooth curve.
+   a pale picture gained contrast and a dark one was lightened. `--house` sets the
+   picture's shadows and white point to the book's along a smooth curve, leaves the
+   middle of the range to the picture, and never stretches tones by more than twice.
 7. **Copied from a printed page (optional).** The print is printed once, which loses the
    palest highlights and closes up the deepest shadows; it is re-photographed, which
    softens detail and raises contrast; and it is printed again. The result is shown with
@@ -107,7 +113,8 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 | Halation as light reflected from the film base, about 65 micrometres wide on still film | The halation model in spektrafilm, re-implemented here |
 | Long-tailed softness, exponent near 1.15 | A fit of the 54 distinct film sharpness curves in spectral_film_lut: 51 fall off closer to exp(-f/fc) than to a Gaussian. Tri-X is the most Gaussian of them |
 | Highlight dots that drop out and shadow dots that fill in at each printing (5% and 95% nominal, 15% and 85% on a small press) | J. D. Corey, [Making PMT Halftone Prints](https://www.osti.gov/servlets/purl/7107710), Bendix, 1977 |
-| The tone range of the book's pages (display values 0.08, 0.11, 0.22, 0.55, 0.78, 0.95, 1.00 at the 2nd, 10th, 25th, 50th, 75th, 90th and 98th percentiles) | Twelve picture pages of the book, measured from scans. Medians, except the 10th and 25th, which are the lower quartile across pages (the medians are 0.12 and 0.24) so that shadows keep a little more depth |
+| Shadows and white point of the book's pages (display values 0.08, 0.11 and 0.22 at the 2nd, 10th and 25th percentiles; 0.95 and 1.00 at the 90th and 98th) | Twelve picture pages of the book, measured from scans. The 10th and 25th are the lower quartile across pages (the medians are 0.12 and 0.24) so that shadows keep a little more depth |
+| Grain falling away in light tones | The same pages: texture in smooth areas is strongest at display values 0.3 to 0.5 and about 0.6 to 0.7 of that in lighter greys |
 | Softness of 10 micrometres | The book's pages measure edge widths of 1.33 px (sharpest tenth) and 2.10 px (median) at 900 px on the long edge; renders at 10 to 11 land closest |
 | Solid ink density 1.20 on uncoated cream paper | Values published for the German offset process standard (paper type 5) |
 
@@ -142,6 +149,8 @@ for Double-X, and checks the contrast index and gamma of the named developments.
 
 - `twb2.py`: the tool.
 - `tools/calibrate.py`: the checks above.
+- `tools/audit.py`: measures renders against reference pages (tone range, edge softness, grain by scale).
+- `docs/RESEARCH.md`: the research, sources, technical overview and decisions.
 - `tools/fit_mtf.py`: fits the sharpness model to a film's curve and writes its `data/*_mtf_fit.json`.
 - `tools/extract_data.py`: rebuilds `data/*.json` from a checkout of spectral_film_lut.
 - `tools/sheets.py`: builds contact sheets for a 5K display. It expects test photos in `photos/`.
