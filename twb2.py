@@ -37,6 +37,7 @@ import os
 import numpy as np
 from PIL import Image, ImageCms, ImageOps, PngImagePlugin
 from scipy import ndimage as ndi
+from scipy.interpolate import PchipInterpolator
 
 F = np.float32
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -72,6 +73,11 @@ APERTURE_UM2 = math.pi * 24.0 ** 2   # the 48 um aperture granularity is quoted 
 FILM_DMAX = 3.4              # net density the emulsion can reach (top of the datasheet's granularity plot)
 GRAIN_UNIFORMITY = 0.6       # black-and-white value used by spektrafilm
 PAPER_CREAM = (0.957, 0.937, 0.882)   # display colour of the uncoated stock [tuned]
+# The tone range the book's picture pages share: display values at these percentiles of a
+# page, as the median over twelve pages measured from scans. The darkest tenth and quarter
+# sit within a few hundredths of these values on every page measured.
+HOUSE_PCT = (2, 10, 25, 50, 75, 90, 98)
+HOUSE_VAL = (0.08, 0.12, 0.24, 0.55, 0.78, 0.95, 1.00)
 
 
 # ---------- colour and file handling -------------------------------------------
@@ -409,6 +415,22 @@ def copied_from_page(R, p, long_edge):
     return (1.0 - t * (1.0 - black)).astype(F)
 
 
+def house_tones(R, strength):
+    """Pull a picture's tones toward the range the book's pages share. The book's makers
+    copied every source to a common look: a pale picture gained contrast and a dark one was
+    lightened. Here the picture's own percentiles are moved part of the way (`strength`, 0 to
+    1) to the book's, along a smooth curve that keeps their order."""
+    v = lin_to_srgb(np.clip(R, 0.0, 1.0))
+    own = np.percentile(v[::3, ::3], HOUSE_PCT)
+    want = (1.0 - strength) * own + strength * np.array(HOUSE_VAL)
+    xs, ys = [0.0], [0.0]
+    for x, y in zip(own, want):
+        if x - xs[-1] > 0.01 and x < 0.99:               # skip percentiles that sit on the black floor or on white
+            xs.append(float(x)); ys.append(float(max(y, ys[-1] + 1e-4)))
+    xs.append(1.0); ys.append(1.0)
+    return srgb_to_lin(np.clip(PchipInterpolator(xs, ys)(v), 0.0, 1.0)).astype(F)
+
+
 def halftone_on_page(R, p, mm):
     """Print reflectance -> page reflectance relative to the paper, after the copy
     camera, the halftone screen, the press and the paper."""
@@ -470,6 +492,8 @@ def render(rgb, p):
     solid = 0.0
     if p.repro == "copy":
         R = copied_from_page(R, p, long_edge)
+    if p.house > 0:
+        R = house_tones(R, p.house)
     if p.repro == "book":
         R, solid = halftone_on_page(R, p, mm)
     if k > 1:
@@ -566,6 +590,9 @@ def parser():
     g.add_argument("--print-grey", type=float, default=0.745,
                    help="print density a metered grey gets before --print-ev is applied (0.745 = 18%% grey)")
     g.add_argument("--enlarger-um", type=float, default=2.3, help="enlarger lens blur on the film, micrometres [tuned]")
+    g.add_argument("--house", type=float, default=0.0,
+                   help="pull the picture's tones toward the range the book's own pages share, from 0 (off) "
+                        "to 1 (matched). The book's pages keep their shadows more open than a straight print")
     g = ap.add_argument_group("copied from a printed page (with --repro copy)")
     g.add_argument("--copy-blur", type=float, default=0.35,
                    help="softness of the copy, in thousandths of the picture's long edge. The reference "
