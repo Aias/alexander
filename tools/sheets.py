@@ -33,8 +33,7 @@ def render(name, work, quiet=True, **kw):
     p = twb2.parser().parse_args(args)
     for k, v in kw.items():
         setattr(p, k, v)
-    if p.view is None:
-        p.view = "scan" if p.repro == "book" else "print"
+    twb2.prepare(p)
     rgb = twb2.load_linear(p.input, work)
     with contextlib.redirect_stdout(io.StringIO()) if quiet else contextlib.nullcontext():
         return np.clip(twb2.render(rgb, p), 0, 1)
@@ -160,7 +159,7 @@ def stages():
     """One photo after each step of the chain, each step added to the ones before."""
     import copy
     name, work = "rooftops", 5120
-    p = twb2.parser().parse_args([os.path.join(ROOT, "photos", name + ".jpg"), "-o", "x", "--auto-ev"])
+    p = twb2.prepare(twb2.parser().parse_args([os.path.join(ROOT, "photos", name + ".jpg"), "-o", "x", "--auto-ev"]))
     rgb = twb2.load_linear(p.input, work)
     long_edge = max(rgb.shape[:2])
     um = p.film_mm * 1000.0 / long_edge

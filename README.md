@@ -37,9 +37,11 @@ Useful switches:
 | `--lens-um` | Softness of the picture on the film, as a blur radius in micrometres. It acts before development, so grain stays crisp over the softened picture. 0 is off; the reference scans, at the size of a book page, sit between 10 and 30 | 5 |
 | `--lens-exponent` | Shape of that softness. 2 is a Gaussian. Lower values keep a sharp core and add a long faint skirt; published film sharpness curves sit near 1.15 | 1.15 |
 | `--halation` | Light reflected back from the film base as a wide glow around bright areas, as a fraction of the light. 0.02 to 0.08 covers films with weak protection against it | 0 (off) |
+| `--film` | `trix`: Kodak Tri-X Pan from its datasheet. `trix-1956`: the same curves with the coarser grain and lower sharpness Kodak classed Tri-X at in 1956 (estimated). `doublex`: Eastman Double-X 5222, an emulsion of 1959 | trix |
 | `--film-mm` | Long edge of the piece of film the picture fills: 36 is a whole 35mm frame, 18 is half-frame, 56 is medium format. Smaller means more grain | 24 |
-| `--dev` | Development time in minutes, 6 to 11; longer is more contrast | 7 |
+| `--dev` | Development time in minutes (Tri-X 6 to 11, Double-X 4 to 12); longer is more contrast. Or a period's recommended development: `norm-1952`, `norm-1956`, `norm-1981`. A longer development wants a softer `--grade` | 7 (Double-X 6) |
 | `--grain` | Granularity relative to the datasheet figure | 1.0 |
+| `--grain-dev` | How granularity grows with development: the power of the negative's contrast it follows. 1.3 is the value measured on Double-X | 0 (fixed) |
 | `--edge`, `--no-edge` | Strength of development edge effects | 1.0 |
 | `--edge-density` | How edge effects grow with the density of the negative. 0 uses the tone difference alone; 1 follows Nelson's measurement, which makes fringes stronger in the light parts of the picture | 0 |
 | `--filter` | Lens filter: `none`, `yellow`, `orange`, `red` | none |
@@ -59,8 +61,9 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
    The image is then softened slightly, as a lens and a film do. The softness has a sharp
    core and a long faint skirt (`--lens-exponent 2` makes it a plain Gaussian), and
    `--halation` adds the glow of light reflected from the back of the film.
-2. **Film curve.** Exposure becomes density along the Tri-X characteristic curve for the
-   chosen development time. A metered grey is placed where an ISO 400 exposure puts it.
+2. **Film curve.** Exposure becomes density along the film's characteristic curve for the
+   chosen development time. A metered grey is placed where an exposure at the film's
+   speed puts it.
 3. **Edge effects.** Dense areas hold back development nearby, which lifts contrast at
    edges and in small details. Applied to exposure before the curve, so it fades in
    blocked shadows and blown highlights. With `--edge-density 1` the change at an edge
@@ -69,7 +72,8 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 4. **Grain.** Each cell of the simulation grid holds a number of grains that follows from
    its area on the film. The number developed is drawn from a Poisson distribution. No
    texture is added and no noise is filtered: grain strength comes from the film format
-   and its apparent size from the grid.
+   and its apparent size from the grid. With `--grain-dev` the granularity also rises
+   with development, as measured on real film.
 5. **Print.** The negative is printed on Kodak Polymax paper of the chosen grade.
 6. **Copied from a printed page (optional).** The print is printed once, which loses the
    palest highlights and closes up the deepest shadows; it is re-photographed, which
@@ -85,6 +89,11 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 | --- | --- |
 | Film curves, spectral sensitivity, sharpness curve, granularity 17 | Kodak Tri-X 400 datasheet, as digitised in [spectral_film_lut](https://github.com/JanLohse/spectral_film_lut) |
 | Paper curves by grade | Kodak Polymax Fine-Art datasheet, same digitisation |
+| The same four quantities for Double-X 5222 (granularity 14) | Eastman Double-X datasheet, same digitisation. Its sharpness fit has a long-tailed emulsion blur (exponent 1.11) |
+| Granularity growing as the negative's contrast to the power 1.3 to 1.4, whatever the developer | J. C. Trinder, [Aerial Film Granularity and Its Influence on Visual Performance](https://www.isprs.org/proceedings/XXIII/congress/part1/167_XXIII-B1.pdf), 1980, measured on Kodak Double-X Aerographic. Applying it to Tri-X is an assumption |
+| Granularity 17 quoted for development to a contrast index of 0.56 | Kodak F-4017 and F-9 datasheets |
+| Recommended development by period, as negative gamma: 0.80 to 0.87 in 1952, 0.68 to 0.75 in 1956 | Time-gamma curves in *Kodak Films*, [5th](https://archive.org/details/kodak-films-5) and [7th](https://archive.org/details/kodak-films) editions |
+| Tri-X classed medium grain, 75 to 90 lines/mm in 1956; fine grain, 100 to 125 lines/mm in 1981 | *Kodak Films*, 7th edition, and Kodak [AF-1](https://archive.org/details/kodak-films-color-and-b-w), 1981. The granularity of 22 and the wider blur of `--film trix-1956` are estimates from those classes |
 | Grain statistics, and the step from a catalogue granularity to a grain size | The grain model in [spektrafilm](https://github.com/andreavolpato/spektrafilm) (development branch), re-implemented here |
 | Edge-effect mechanism | spektrafilm's inhibitor model; strength and reach are fitted to the Tri-X sharpness curve by `tools/fit_mtf.py` |
 | Edge effects proportional to density and to the density difference | Nelson's measurement (Photogr. Sci. Eng. 15, 1971), as reported by Rajkowski and Nowak, [Optica Applicata 31(1), 2001](https://opticaapplicata.pwr.edu.pl/files/pdf/2001/no1/optappl_3101p185.pdf) |
@@ -117,13 +126,14 @@ python3 tools/calibrate.py
 This confirms that the simulated negative reads the datasheet granularity of 17 through
 a 48 micrometre aperture at three pixel sizes, that its sharpness follows the published
 curve, that the film and paper curves pass through the digitised points, and that a
-picture supplied at 1,500 px and at 4,500 px renders the same.
+picture supplied at 1,500 px and at 4,500 px renders the same. It repeats the film checks
+for Double-X, and checks the contrast index and gamma of the named developments.
 
 ## Files
 
 - `twb2.py`: the tool.
 - `tools/calibrate.py`: the checks above.
-- `tools/fit_mtf.py`: fits the sharpness model to the Tri-X curve and writes `data/trix400_mtf_fit.json`.
+- `tools/fit_mtf.py`: fits the sharpness model to a film's curve and writes its `data/*_mtf_fit.json`.
 - `tools/extract_data.py`: rebuilds `data/*.json` from a checkout of spectral_film_lut.
 - `tools/sheets.py`: builds contact sheets for a 5K display. It expects test photos in `photos/`.
 - `compare.py`: tone and texture statistics for comparing renders with reference images.

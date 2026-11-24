@@ -16,6 +16,8 @@ so the same settings give the same picture at 1,000 px and at 48 MP.
 
 Sourced numbers (README.md lists where each comes from):
   film curve, colour response, granularity 17, sharpness curve  Kodak Tri-X 400 datasheet
+  the same for Double-X 5222 (granularity 14)                    Eastman Double-X datasheet
+  granularity grows as contrast to the power 1.3                 Trinder 1980, measured on Double-X
   paper curves by grade                                          Kodak Polymax Fine-Art datasheet
   grain statistics, granularity -> grain size                    spektrafilm (dev branch), re-implemented
   edge-effect mechanism; strength and size                       spektrafilm / fitted to the Tri-X curve
@@ -38,11 +40,34 @@ from scipy import ndimage as ndi
 
 F = np.float32
 HERE = os.path.dirname(os.path.abspath(__file__))
-TRIX = json.load(open(os.path.join(HERE, "data", "trix400.json")))
-FIT = json.load(open(os.path.join(HERE, "data", "trix400_mtf_fit.json")))
 POLYMAX = json.load(open(os.path.join(HERE, "data", "polymax.json")))
 
+# The films. "trix-1956" is the Tri-X data with the grain and sharpness Kodak's 1956 sheets
+# class it at: medium grain against today's fine, 75-90 lines/mm against 100-125. Its two
+# numbers are estimates from those classes, not measurements.
+FILMS = {
+    "trix": {"data": "trix400.json", "fit": "trix400_mtf_fit.json"},
+    "trix-1956": {"data": "trix400.json", "fit": "trix400_mtf_fit.json", "rms_granularity": 22, "emulsion_blur": 1.33},
+    "doublex": {"data": "doublex5222.json", "fit": "doublex5222_mtf_fit.json"},
+}
+# Development Kodak recommended in each period, as the gamma of the negative; None stands for
+# the contrast index the datasheet's granularity is quoted at.
+DEV_NORMS = {"norm-1952": 0.83, "norm-1956": 0.71, "norm-1981": None}
+FILM = FIT = None
 LOGH_GREY = -1.75            # log10 lux-seconds given to an 18% grey by a meter at ISO 400
+
+
+def select_film(name):
+    """Make one of FILMS the film every later call simulates."""
+    global FILM, FIT, LOGH_GREY
+    spec = FILMS[name]
+    FILM = json.load(open(os.path.join(HERE, "data", spec["data"])))
+    FIT = json.load(open(os.path.join(HERE, "data", spec["fit"])))
+    FILM.update({k: v for k, v in spec.items() if k not in ("data", "fit")})
+    LOGH_GREY = -1.75 + math.log10(400.0 / FILM.get("iso", 400))   # a slower film is given more light
+
+
+select_film("trix")
 APERTURE_UM2 = math.pi * 24.0 ** 2   # the 48 um aperture granularity is quoted for
 FILM_DMAX = 3.4              # net density the emulsion can reach (top of the datasheet's granularity plot)
 GRAIN_UNIFORMITY = 0.6       # black-and-white value used by spektrafilm
@@ -114,11 +139,11 @@ def blur_shaped(x, sigma_px, exponent):
 
 # ---------- the negative ----------------------------------------------------------
 def film_curve(dev_min):
-    """Tri-X characteristic curve at a development time (minutes), as arrays of log
-    exposure and density, interpolated between the datasheet's 6, 7, 9 and 11 minutes."""
+    """The film's characteristic curve at a development time (minutes), as arrays of log
+    exposure and density, interpolated between the times the datasheet gives."""
     x = np.arange(-4.5, 2.0001, 0.01)
     table = {}
-    for t, pts in TRIX["curves_logH_density"].items():
+    for t, pts in FILM["curves_logH_density"].items():
         px = np.array([p[0] for p in pts]); py = np.array([p[1] for p in pts])
         y = np.interp(x, px, py)
         end = (py[-1] - py[-3]) / (px[-1] - px[-3])          # slope where the data stops
@@ -133,6 +158,80 @@ def film_curve(dev_min):
     return x, (1 - f) * table[times[lo]] + f * table[times[hi]]
 
 
+def contrast_index(cx, cy):
+    """Kodak's contrast index: the slope of the straight line through two points of the
+    curve that lie 0.2 and 2.2 units from one point on the base-plus-fog line."""
+    base = float(cy.min())
+
+    def hit(c, r):                          # where the curve is r away from (c, base)
+        d = np.hypot(cx - c, cy - base) - r
+        i = np.where((d[:-1] < 0) & (d[1:] >= 0) & (cx[:-1] >= c))[0]
+        if len(i) == 0:
+            return None
+        i = int(i[0]); t = -d[i] / (d[i + 1] - d[i])
+        return cx[i] + t * (cx[i + 1] - cx[i]), cy[i] + t * (cy[i + 1] - cy[i])
+
+    best = None
+    for c in np.arange(cx[0], cx[-1] - 2.2, 0.005):
+        a, b = hit(c, 0.2), hit(c, 2.2)
+        if a is None or b is None:
+            continue
+        err = abs(math.atan2(a[1] - base, a[0] - c) - math.atan2(b[1] - base, b[0] - c))
+        if best is None or err < best[0]:
+            best = (err, (b[1] - base) / (b[0] - c))
+    return best[1]
+
+
+def curve_gamma(cx, cy):
+    """Slope of the curve's straight part, taken between net densities 0.6 and 1.0."""
+    net = cy - cy.min()
+    return float(np.gradient(cy, cx)[(net > 0.6) & (net < 1.0)].mean())
+
+
+def dev_times():
+    return sorted(float(t) for t in FILM["curves_logH_density"])
+
+
+def dev_for(measure, target):
+    """Development time at which `measure` of the curve reaches `target`, within the
+    range of times the datasheet covers."""
+    lo, hi = dev_times()[0], dev_times()[-1]
+    if measure(*film_curve(lo)) >= target:
+        return lo
+    if measure(*film_curve(hi)) <= target:
+        return hi
+    for _ in range(30):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if measure(*film_curve(mid)) < target else (lo, mid)
+    return round(0.5 * (lo + hi), 2)
+
+
+def granularity_contrast_index():
+    """Contrast index of the development the datasheet's granularity figure is quoted for."""
+    if "granularity_contrast_index" in FILM:
+        return FILM["granularity_contrast_index"]
+    return contrast_index(*film_curve(FILM["granularity_dev"]))
+
+
+def resolve_dev(dev):
+    """Minutes from --dev: a number, a period norm, or the film's default when not given."""
+    if dev is None:
+        return float(FILM["default_dev"])
+    if dev in DEV_NORMS:
+        g = DEV_NORMS[dev]
+        return dev_for(contrast_index, granularity_contrast_index()) if g is None else dev_for(curve_gamma, g)
+    return float(dev)
+
+
+def development_grain(p):
+    """Factor on granularity for the chosen development. Measured on Double-X, granularity
+    at density 1.0 grows as the negative's contrast to a power of 1.3 to 1.4, whatever the
+    developer (Trinder 1980). The factor is 1 at the development the datasheet figure is for."""
+    if p.grain_dev <= 0:
+        return 1.0
+    return float((contrast_index(*film_curve(p.dev)) / granularity_contrast_index()) ** p.grain_dev)
+
+
 def grain_area_um2(rms_granularity):
     """Area of one developed grain that reproduces a catalogue granularity figure
     (standard deviation of density x 1000 through a 48 um aperture at net density 1.0)."""
@@ -143,7 +242,7 @@ def grain_area_um2(rms_granularity):
 def add_grain(D, um, scale, rng):
     """Each pixel holds N grains; the number developed is Poisson. That gives the
     variance D (Dmax - u D) / N behind the catalogue figure, and its skew at small N."""
-    N = (um * um) / grain_area_um2(TRIX["rms_granularity"] * scale)
+    N = (um * um) / grain_area_um2(FILM["rms_granularity"] * scale)
     prob = np.clip(D / FILM_DMAX, 0.0, 0.98)
     sat = 1.0 - GRAIN_UNIFORMITY * prob
     return (rng.poisson(N * prob / sat).astype(F) * (FILM_DMAX / N) * sat).astype(F)
@@ -152,7 +251,7 @@ def add_grain(D, um, scale, rng):
 def film_exposure(rgb, p, weights=None):
     """Linear RGB -> the exposure the film receives, scaled so a metered grey is 0.18.
     `weights` overrides the film's colour response (used to show a plain conversion)."""
-    w = weights or TRIX["rgb_weights"][p.filter]
+    w = weights or FILM["rgb_weights"][p.filter]
     E = (w["r"] * rgb[..., 0] + w["g"] * rgb[..., 1] + w["b"] * rgb[..., 2]).astype(F)
     ev = p.ev
     if p.auto_ev is not None:
@@ -172,11 +271,12 @@ def expose_and_develop(rgb, p, um, rng):
     # softness of the image that reaches the film, then light scatter in the emulsion.
     # Both act on light before development, so grain stays crisp over the softened picture
     # and the film and paper curves firm up the softened edges.
-    if abs(p.lens_exponent - 2.0) < 1e-6:
-        E = blur(E, math.hypot(p.lens_um, FIT["optical_sigma_um"][0]) / um)
+    opt, opt_n = FIT["optical_sigma_um"][0] * FILM.get("emulsion_blur", 1.0), FIT.get("optical_exponent", 2.0)
+    if abs(p.lens_exponent - 2.0) < 1e-6 and abs(opt_n - 2.0) < 1e-6:
+        E = blur(E, math.hypot(p.lens_um, opt) / um)
     else:
         E = blur_shaped(E, p.lens_um / um, p.lens_exponent)
-        E = blur(E, FIT["optical_sigma_um"][0] / um)
+        E = blur_shaped(E, opt / um, opt_n)
     if p.halation > 0:
         # halation: light that passed through the emulsion is reflected by the back of the
         # film base and returns as a wide, faint glow. Three reflections, each half as strong
@@ -212,7 +312,7 @@ def expose_and_develop(rgb, p, um, rng):
     del logH
 
     if p.grain > 0:
-        D = add_grain(D, um, p.grain, rng)
+        D = add_grain(D, um, p.grain * development_grain(p), rng)
 
     return D, ref
 
@@ -420,11 +520,15 @@ def parser():
     ap.add_argument("--out-long-edge", type=int, help="long edge of the saved file (default: the input's)")
     ap.add_argument("--bits", type=int, choices=(8, 16), default=8)
     ap.add_argument("--seed", type=int, default=1)
-    g = ap.add_argument_group("negative (Kodak Tri-X 400)")
+    g = ap.add_argument_group("negative")
+    g.add_argument("--film", choices=sorted(FILMS), default="trix",
+                   help="trix: Kodak Tri-X Pan from its datasheet (default). trix-1956: the same curves with "
+                        "the coarser grain and lower sharpness Kodak classed Tri-X at in 1956 [estimated]. "
+                        "doublex: Eastman Double-X 5222, an emulsion of 1959")
     g.add_argument("--film-mm", type=float, default=24.0,
                    help="long edge of the piece of film the picture fills: 36 = a whole 35mm frame, 24 = a "
                         "moderate crop of one (default), 18 = half-frame, 56 = 6x4.5")
-    g.add_argument("--filter", choices=sorted(TRIX["rgb_weights"]), default="none", help="lens filter")
+    g.add_argument("--filter", choices=sorted(FILM["rgb_weights"]), default="none", help="lens filter")
     g.add_argument("--lens-um", type=float, default=5.0,
                    help="softness of the picture on the film, as a blur radius in micrometres: lens, focus, "
                         "camera movement and losses from copying. Applied before development, so grain is "
@@ -442,8 +546,14 @@ def parser():
                    help="width of the first reflection on the film, micrometres (65 for still-film base)")
     g.add_argument("--ev", type=float, default=0.0, help="exposure in stops")
     g.add_argument("--auto-ev", type=float, nargs="?", const=0.45, default=None, metavar="TARGET")
-    g.add_argument("--dev", type=float, default=7.0, help="development time in minutes, 6 to 11 (longer = more contrast)")
-    g.add_argument("--grain", type=float, default=1.0, help="granularity relative to the datasheet's 17")
+    g.add_argument("--dev", default=None,
+                   help="development time in minutes (Tri-X 6 to 11, default 7; Double-X 4 to 12, default 6; "
+                        "longer = more contrast), or a period's recommended development: norm-1952, "
+                        "norm-1956 or norm-1981. A longer development wants a softer --grade")
+    g.add_argument("--grain", type=float, default=1.0, help="granularity relative to the film's datasheet figure")
+    g.add_argument("--grain-dev", type=float, default=0.0,
+                   help="how granularity grows with development: the power of the negative's contrast it "
+                        "follows. 0 leaves it fixed; 1.3 is the value measured on Double-X")
     g.add_argument("--edge", type=float, default=1.0, help="edge-effect strength relative to the datasheet fit")
     g.add_argument("--edge-density", type=float, default=0.0,
                    help="how edge effects grow with the density of the negative. 0 uses the difference "
@@ -494,10 +604,17 @@ def parser():
     return ap
 
 
-def main(argv=None):
-    p = parser().parse_args(argv)
+def prepare(p):
+    """Settle the settings that depend on one another: the film, its development, the view."""
+    select_film(p.film)
+    p.dev = resolve_dev(p.dev)
     if p.view is None:
         p.view = "scan" if p.repro == "book" else "print"
+    return p
+
+
+def main(argv=None):
+    p = prepare(parser().parse_args(argv))
     with Image.open(p.input) as im:
         original = max(im.size)
     if p.out_long_edge is None:

@@ -1,0 +1,11 @@
+{
+ "kappa": 0.3777,
+ "inhibitor_sigma_um": 72.71,
+ "inhibitor_tail_um": 200.0,
+ "inhibitor_tail_weight": 0.03,
+ "optical_sigma_um": [
+  5.93
+ ],
+ "optical_exponent": 1.108,
+ "rms_error": 0.0199
+}

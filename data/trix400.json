@@ -618,5 +618,8 @@
    "b": 0.0
   }
  },
- "rgb_weights_note": "three Gaussian bands (R 605/32, G 540/32, B 455/24 nm) integrated against the digitised sensitivity; filters are sigmoid cut-ons at 495, 550, 600 nm"
+ "rgb_weights_note": "three Gaussian bands (R 605/32, G 540/32, B 455/24 nm) integrated against the digitised sensitivity; filters are sigmoid cut-ons at 495, 550, 600 nm",
+ "iso": 400,
+ "default_dev": 7,
+ "granularity_contrast_index": 0.56
 }
