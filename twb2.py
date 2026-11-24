@@ -2,14 +2,15 @@
 """twb2: the look of the photographs in "The Timeless Way of Building", built as the
 physical chain those pictures went through, in physical units.
 
-    scene -> Tri-X negative (curve, edge effects, grain) -> print on paper
-          -> halftone on uncoated stock -> scan or page view
+    scene -> lens and film (softness, halation) -> Tri-X negative (curve, edge effects, grain)
+          -> print on paper -> optional: copied from a printed page, or halftone on uncoated stock
 
 Every length is in micrometres on the film or millimetres on the printed page, and the
 simulation runs on a grid of fixed size (--detail-px) before being enlarged to the output,
 so the same settings give the same picture at 1,000 px and at 48 MP.
 
     python3 twb2.py photo.jpg -o out.png --auto-ev                              # darkroom print
+    python3 twb2.py photo.jpg -o out.png --auto-ev --repro copy                 # + copied from a printed page
     python3 twb2.py photo.jpg -o out.png --auto-ev --repro book                 # + printing press
     python3 twb2.py photo.jpg -o out.png --auto-ev --repro book --view page     # + cream paper
 
@@ -18,8 +19,13 @@ Sourced numbers (README.md lists where each comes from):
   paper curves by grade                                          Kodak Polymax Fine-Art datasheet
   grain statistics, granularity -> grain size                    spektrafilm (dev branch), re-implemented
   edge-effect mechanism; strength and size                       spektrafilm / fitted to the Tri-X curve
+  edge effects grow with density                                 Nelson 1971, as reported by Rajkowski and Nowak 2001
+  halation mechanism and its 65 um width on still-film base      spektrafilm, re-implemented
+  long-tailed blur (exponent near 1.15)                          fit of 54 published film sharpness curves
+  dots that drop out and fill in when a picture is printed       Corey, "Making PMT Halftone Prints", 1977
   ink density 1.20, dot gain about 0.2 on uncoated paper         German offset process standard
-Tuned, not sourced: enlarger and copy-lens blur, smallest printable dot, scan levels.
+Tuned, not sourced: lens softness, halation strength, enlarger and copy-lens blur, the copy
+stage's blur and contrast, smallest printable dot, scan levels.
 """
 import argparse
 import json
@@ -88,6 +94,24 @@ def blur(x, sigma_px):
     return big[:h, :w]
 
 
+def blur_shaped(x, sigma_px, exponent):
+    """Blur whose transfer function is exp(-ln 2 (f / f50)^n). With n = 2 it is the Gaussian
+    of the given sigma. A lower n keeps the frequency of half response and changes the
+    shape: a sharp core with a long, faint skirt. Published film sharpness curves fall off
+    with n near 1.15."""
+    if sigma_px < 0.15:
+        return x
+    if abs(exponent - 2.0) < 1e-6:
+        return blur(x, sigma_px)
+    pad = int(min(min(x.shape) - 1, math.ceil(40 * sigma_px) + 16))   # the skirt reaches far
+    xp = np.pad(x, pad, mode="reflect")
+    f = np.hypot(np.fft.fftfreq(xp.shape[0])[:, None], np.fft.rfftfreq(xp.shape[1])[None, :])
+    f50 = math.sqrt(math.log(2.0) / (2.0 * math.pi ** 2)) / sigma_px
+    H = np.exp(-math.log(2.0) * np.power(f / f50, exponent))
+    out = np.fft.irfft2(np.fft.rfft2(xp) * H, s=xp.shape)
+    return out[pad:-pad, pad:-pad].astype(F)
+
+
 # ---------- the negative ----------------------------------------------------------
 def film_curve(dev_min):
     """Tri-X characteristic curve at a development time (minutes), as arrays of log
@@ -148,12 +172,25 @@ def expose_and_develop(rgb, p, um, rng):
     # softness of the image that reaches the film, then light scatter in the emulsion.
     # Both act on light before development, so grain stays crisp over the softened picture
     # and the film and paper curves firm up the softened edges.
-    E = blur(E, math.hypot(p.lens_um, FIT["optical_sigma_um"][0]) / um)
+    if abs(p.lens_exponent - 2.0) < 1e-6:
+        E = blur(E, math.hypot(p.lens_um, FIT["optical_sigma_um"][0]) / um)
+    else:
+        E = blur_shaped(E, p.lens_um / um, p.lens_exponent)
+        E = blur(E, FIT["optical_sigma_um"][0] / um)
+    if p.halation > 0:
+        # halation: light that passed through the emulsion is reflected by the back of the
+        # film base and returns as a wide, faint glow. Three reflections, each half as strong
+        # as the last and wider by the square root of its number.
+        w = (1.0, 0.5, 0.25)
+        glow = sum(wk / sum(w) * blur(E, p.halation_um * math.sqrt(k) / um) for k, wk in enumerate(w, 1))
+        E = ((E + p.halation * glow) / (1.0 + p.halation)).astype(F)
+        del glow
     logH = (np.log10(np.maximum(E, 1e-6) / 0.18) + LOGH_GREY).astype(F)
     del E
 
     cx, cy = film_curve(p.dev)
     base = float(cy.min())
+    ref = float(np.interp(LOGH_GREY, cx, cy) - base)                # density of a metered grey
     D = (np.interp(logH, cx, cy) - base).astype(F)
 
     if not p.no_edge:
@@ -165,6 +202,10 @@ def expose_and_develop(rgb, p, um, rng):
         k = p.edge * FIT["kappa"] / gamma
         tw = FIT["inhibitor_tail_weight"]
         spread = (1 - tw) * blur(D, FIT["inhibitor_sigma_um"] / um) + tw * blur(D, FIT["inhibitor_tail_um"] / um)
+        # Nelson's measurement: the change at an edge grows with the density itself as well
+        # as with the difference across the edge. The fitted strength holds at a metered grey.
+        if p.edge_density > 0:
+            k = k * np.power(np.maximum(D, 0.0) / ref, p.edge_density)
         logH += (k * (D - spread)).astype(F)
         del spread
         D = (np.interp(logH, cx, cy) - base).astype(F)
@@ -173,7 +214,6 @@ def expose_and_develop(rgb, p, um, rng):
     if p.grain > 0:
         D = add_grain(D, um, p.grain, rng)
 
-    ref = float(np.interp(LOGH_GREY, cx, cy) - base)                # density of a metered grey
     return D, ref
 
 
@@ -226,6 +266,47 @@ def compress_range(d, d_in_max, d_out_max):
         tau = 0.5 * (lo + hi)
         lo, hi = (tau, hi) if tau * (1 - math.exp(-d_in_max / tau)) < d_out_max else (lo, tau)
     return (d_out_max * (1 - np.exp(-d / tau)) / (1 - math.exp(-d_in_max / tau))).astype(F)
+
+
+def smoothstep(lo, hi, x):
+    t = np.clip((x - lo) / (hi - lo), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def printed_once(t, drop, fill):
+    """Tone value (0 paper, 1 solid) after one printing: dots smaller than `drop` fail to
+    print, and tones above `fill` close up into solid ink."""
+    t = t * smoothstep(0.6 * drop, 1.4 * drop, t)
+    return 1.0 - (1.0 - t) * smoothstep(0.6 * (1.0 - fill), 1.4 * (1.0 - fill), 1.0 - t)
+
+
+def s_curve(x, gain):
+    """Contrast gain about the middle of 0..1 with both ends held."""
+    x = np.clip(x, 0.0, 1.0)
+    return np.where(x < 0.5, 0.5 * np.power(2.0 * x, gain), 1.0 - 0.5 * np.power(2.0 * (1.0 - x), gain))
+
+
+def copied_from_page(R, p, long_edge):
+    """The darkroom print as it looks after being printed in a book or magazine,
+    re-photographed from that page, and printed again. Each printing loses the two ends
+    of the scale; the copy between them softens detail and raises contrast. The result is
+    shown the way the reference scans are, with solid ink as the print's own black."""
+    rng = print_range(p.grade)
+    black, solid = 10.0 ** -rng, 10.0 ** -p.copy_ink
+    # first printing: the print's long density range is fitted to what ink can hold
+    d = compress_range(-np.log10(np.clip(R, black, 1.0)), rng, p.copy_ink)
+    t = ((1.0 - np.power(F(10.0), -d)) / (1.0 - solid)).astype(F)   # dot asked for: 0 paper, 1 solid
+    del d
+    t = printed_once(t, p.copy_drop, p.copy_fill)
+    # the copy: its lens, and the old screen blurred away; then contrasty copy film
+    t = blur(t.astype(F), p.copy_blur / 1000.0 * long_edge)
+    vb = float(lin_to_srgb(np.float64(black)))
+    v = (lin_to_srgb(1.0 - t * (1.0 - black)) - vb) / (1.0 - vb)    # tone as the eye sees it, 0 black to 1 white
+    v = vb + s_curve(v, p.copy_gain) * (1.0 - vb)
+    t = np.clip((1.0 - srgb_to_lin(v)) / (1.0 - black), 0.0, 1.0)
+    # second printing
+    t = printed_once(t, p.copy_drop, p.copy_fill)
+    return (1.0 - t * (1.0 - black)).astype(F)
 
 
 def halftone_on_page(R, p, mm):
@@ -287,6 +368,8 @@ def render(rgb, p):
     del rgb
     R = print_on_paper(D, ref, p, um)
     solid = 0.0
+    if p.repro == "copy":
+        R = copied_from_page(R, p, long_edge)
     if p.repro == "book":
         R, solid = halftone_on_page(R, p, mm)
     if k > 1:
@@ -347,11 +430,25 @@ def parser():
                         "camera movement and losses from copying. Applied before development, so grain is "
                         "not softened. 0 is off; the reference scans, at the size of a book page, sit "
                         "between 10 and 30 [tuned]")
+    g.add_argument("--lens-exponent", type=float, default=2.0,
+                   help="shape of that softness. 2 is a Gaussian; lower values keep a sharp core and add a "
+                        "long faint skirt, which lowers the contrast of middle-sized detail and keeps fine "
+                        "edges. Published film sharpness curves sit near 1.15")
+    g.add_argument("--halation", type=float, default=0.0,
+                   help="light reflected back from the film base as a wide glow around bright areas, as a "
+                        "fraction of the light. 0 is off; 0.02 to 0.08 covers films with weak "
+                        "anti-halation protection [tuned]")
+    g.add_argument("--halation-um", type=float, default=65.0,
+                   help="width of the first reflection on the film, micrometres (65 for still-film base)")
     g.add_argument("--ev", type=float, default=0.0, help="exposure in stops")
     g.add_argument("--auto-ev", type=float, nargs="?", const=0.45, default=None, metavar="TARGET")
     g.add_argument("--dev", type=float, default=7.0, help="development time in minutes, 6 to 11 (longer = more contrast)")
     g.add_argument("--grain", type=float, default=1.0, help="granularity relative to the datasheet's 17")
     g.add_argument("--edge", type=float, default=1.0, help="edge-effect strength relative to the datasheet fit")
+    g.add_argument("--edge-density", type=float, default=1.0,
+                   help="how edge effects grow with the density of the negative. 1 follows Nelson's "
+                        "measurement (the change at an edge is proportional to the density as well as to "
+                        "the difference across it); 0 uses the difference alone")
     g.add_argument("--no-edge", action="store_true", help="switch development edge effects off")
     g = ap.add_argument_group("print (Kodak Polymax Fine-Art)")
     g.add_argument("--grade", type=float, default=3.0, help="paper grade, -1 to 5")
@@ -359,9 +456,23 @@ def parser():
     g.add_argument("--print-grey", type=float, default=0.745,
                    help="print density a metered grey gets before --print-ev is applied (0.745 = 18%% grey)")
     g.add_argument("--enlarger-um", type=float, default=2.3, help="enlarger lens blur on the film, micrometres [tuned]")
+    g = ap.add_argument_group("copied from a printed page (with --repro copy)")
+    g.add_argument("--copy-blur", type=float, default=0.35,
+                   help="softness of the copy, in thousandths of the picture's long edge. The reference "
+                        "scans measure 0.4 to 1.25 at the size of a book page; the default is lower, for "
+                        "viewing at full screen [tuned]")
+    g.add_argument("--copy-gain", type=float, default=1.2, help="contrast gain of the copy film [tuned]")
+    g.add_argument("--copy-drop", type=float, default=0.05,
+                   help="highlight dot that fails to print at each printing (0.05 nominal, 0.15 on a small press)")
+    g.add_argument("--copy-fill", type=float, default=0.95,
+                   help="shadow tone that closes up into solid ink at each printing (0.95 nominal, 0.85 on a small press)")
+    g.add_argument("--copy-ink", type=float, default=1.6,
+                   help="solid ink density on the source page; lower values close up more of the shadows [tuned]")
     g = ap.add_argument_group("book page (offset halftone on uncoated paper)")
-    g.add_argument("--repro", choices=("none", "book"), default="none",
-                   help="none: finish at the darkroom print (default). book: also run the printing press")
+    g.add_argument("--repro", choices=("none", "copy", "book"), default="none",
+                   help="none: finish at the darkroom print (default). copy: the print as it looks after "
+                        "being printed, re-photographed from the page and printed again, which is how the "
+                        "book's own pictures were made. book: run the 1979 printing press on uncoated paper")
     g.add_argument("--page-mm", type=float, default=None,
                    help="long edge of the picture on the page. Default: the size the file prints at --ppi. "
                         "The book's own full-page pictures are about 200")
