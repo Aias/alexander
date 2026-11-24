@@ -30,6 +30,7 @@ Useful switches:
 | `--grade` | Paper grade, -1 (soft) to 5 (hard) | 3 |
 | `--print-ev` | Print exposure in stops; more is darker | -0.5 |
 | `--detail-px` | Long edge of the grid the film and print are simulated on before enlarging. Lower is coarser and softer; 0 uses the input's own size | 2560 |
+| `--lens-um` | Softness of the picture on the film, as a blur radius in micrometres. It acts before development, so grain stays crisp over the softened picture. The reference scans sit between 10 and 30 | 0 |
 | `--film-mm` | Long edge of the piece of film the picture fills: 36 is a whole 35mm frame, 18 is half-frame, 56 is medium format. Smaller means more grain | 24 |
 | `--dev` | Development time in minutes, 6 to 11; longer is more contrast | 7 |
 | `--grain` | Granularity relative to the datasheet figure | 1.0 |
@@ -71,7 +72,7 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 | Edge-effect mechanism | spektrafilm's inhibitor model; strength and reach are fitted to the Tri-X sharpness curve by `tools/fit_mtf.py` |
 | Solid ink density 1.20 on uncoated cream paper | Values published for the German offset process standard (paper type 5) |
 
-Tuned by eye or against reference scans, with no source: enlarger and copy-lens blur, the
+Tuned by eye or against reference scans, with no source: lens softness, enlarger and copy-lens blur, the
 smallest printable dot, the dot gain left uncorrected, the scan levels and the cream
 paper colour.
 

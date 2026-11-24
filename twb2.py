@@ -145,7 +145,10 @@ def film_exposure(rgb, p, weights=None):
 def expose_and_develop(rgb, p, um, rng):
     """Linear RGB -> net density of the developed negative, grain included."""
     E = film_exposure(rgb, p)
-    E = blur(E, FIT["optical_sigma_um"][0] / um)                    # light scatter in the emulsion
+    # softness of the image that reaches the film, then light scatter in the emulsion.
+    # Both act on light before development, so grain stays crisp over the softened picture
+    # and the film and paper curves firm up the softened edges.
+    E = blur(E, math.hypot(p.lens_um, FIT["optical_sigma_um"][0]) / um)
     logH = (np.log10(np.maximum(E, 1e-6) / 0.18) + LOGH_GREY).astype(F)
     del E
 
@@ -339,6 +342,10 @@ def parser():
                    help="long edge of the piece of film the picture fills: 36 = a whole 35mm frame, 24 = a "
                         "moderate crop of one (default), 18 = half-frame, 56 = 6x4.5")
     g.add_argument("--filter", choices=sorted(TRIX["rgb_weights"]), default="none", help="lens filter")
+    g.add_argument("--lens-um", type=float, default=0.0,
+                   help="softness of the picture on the film, as a blur radius in micrometres: lens, focus, "
+                        "camera movement and losses from copying. Applied before development, so grain is "
+                        "not softened. 0 is off; the reference scans sit between 10 and 30 [tuned]")
     g.add_argument("--ev", type=float, default=0.0, help="exposure in stops")
     g.add_argument("--auto-ev", type=float, nargs="?", const=0.45, default=None, metavar="TARGET")
     g.add_argument("--dev", type=float, default=7.0, help="development time in minutes, 6 to 11 (longer = more contrast)")
