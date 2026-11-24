@@ -23,8 +23,8 @@ python3 twb2.py photo.jpg -o out.png --auto-ev
 That renders a darkroom print: a slightly soft image on the negative, developed, with
 grain, printed on grade 3 paper, saved at the size of the input.
 
-The softness shape, the edge-effect rule and the optional stages were chosen by blind
-comparison of renders. Add `--out-long-edge 5120` to save at a chosen size.
+The film, the amount and shape of the softness, the edge-effect rule and the optional
+stages were chosen by blind comparison of renders. Add `--out-long-edge 5120` to save at a chosen size.
 
 Useful switches:
 
@@ -34,10 +34,10 @@ Useful switches:
 | `--grade` | Paper grade, -1 (soft) to 5 (hard) | 3 |
 | `--print-ev` | Print exposure in stops; more is darker | -0.5 |
 | `--detail-px` | Long edge of the grid the film and print are simulated on before enlarging. Lower is coarser and softer; 0 uses the input's own size | 2560 |
-| `--lens-um` | Softness of the picture on the film, as a blur radius in micrometres. It acts before development, so grain stays crisp over the softened picture. 0 is off; the reference scans, at the size of a book page, sit between 10 and 30 | 5 |
+| `--lens-um` | Softness of the picture on the film, as a blur radius in micrometres. It acts before development, so grain stays crisp over the softened picture. 0 is off; the reference scans, at the size of a book page, sit between 10 and 30 | 8 |
 | `--lens-exponent` | Shape of that softness. 2 is a Gaussian. Lower values keep a sharp core and add a long faint skirt; published film sharpness curves sit near 1.15 | 1.15 |
 | `--halation` | Light reflected back from the film base as a wide glow around bright areas, as a fraction of the light. 0.02 to 0.08 covers films with weak protection against it | 0 (off) |
-| `--film` | `trix`: Kodak Tri-X Pan from its datasheet. `trix-1956`: the same curves with the coarser grain and lower sharpness Kodak classed Tri-X at in 1956 (estimated). `doublex`: Eastman Double-X 5222, an emulsion of 1959 | trix |
+| `--film` | `trix-1956`: Tri-X with the coarser grain and lower sharpness Kodak classed it at in 1956 (its two numbers are estimates). `trix`: Kodak Tri-X Pan from its datasheet. `doublex`: Eastman Double-X 5222, an emulsion of 1959 | trix-1956 |
 | `--film-mm` | Long edge of the piece of film the picture fills: 36 is a whole 35mm frame, 18 is half-frame, 56 is medium format. Smaller means more grain | 24 |
 | `--dev` | Development time in minutes (Tri-X 6 to 11, Double-X 4 to 12); longer is more contrast. Or a period's recommended development: `norm-1952`, `norm-1956`, `norm-1981`. A longer development wants a softer `--grade` | 7 (Double-X 6) |
 | `--grain` | Granularity relative to the datasheet figure | 1.0 |

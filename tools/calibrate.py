@@ -25,6 +25,8 @@ def check(name, got, want, tol):
     print(f"  {'PASS' if good else 'FAIL'}  {name}: got {got:.4f}, want {want:.4f} +/- {tol}")
 
 
+twb2.select_film("trix")     # sections 1 to 3 check Tri-X Pan against its datasheet
+
 # 1. Granularity: a uniform negative at net density 1.0, read through a square aperture
 #    with the same area as the 48 um circle the catalogue figure is quoted for
 print("1. granularity at net density 1.0 through a 48 um aperture's area (datasheet: 17)")
@@ -42,7 +44,7 @@ print(f"   at 4.2 um pixels (48 MP on 35mm): per-pixel sd {D.std():.3f} density,
 # 2. Sharpness: sinusoidal exposures through emulsion blur and development
 print("2. sharpness of the developed negative against the datasheet curve")
 um = 1.5
-p = twb2.prepare(twb2.parser().parse_args(["x", "-o", "x", "--grain", "0", "--lens-um", "0"]))   # the datasheet describes the film alone
+p = twb2.prepare(twb2.parser().parse_args(["x", "-o", "x", "--film", "trix", "--grain", "0", "--lens-um", "0"]))   # the datasheet describes the film alone
 cx, cy = twb2.film_curve(p.dev)
 base = cy.min()
 x = np.arange(4096) * um / 1000.0                                  # mm
@@ -127,13 +129,16 @@ check("film curve at 6 min, worst point", max(abs(np.interp(a, cx, cy) - b) for 
 
 # 6. Development and grain
 print("6. development")
-p = twb2.prepare(twb2.parser().parse_args(["x", "-o", "x", "--dev", "norm-1981", "--grain-dev", "1.3"]))
+p = twb2.prepare(twb2.parser().parse_args(["x", "-o", "x", "--film", "trix", "--dev", "norm-1981", "--grain-dev", "1.3"]))
 check("Tri-X contrast index at the development its granularity is quoted for", twb2.contrast_index(*twb2.film_curve(p.dev)), 0.56, 0.005)
 check("granularity factor at that development", twb2.development_grain(p), 1.0, 0.01)
-p = twb2.prepare(twb2.parser().parse_args(["x", "-o", "x", "--dev", "11", "--grain-dev", "1.3"]))
+p = twb2.prepare(twb2.parser().parse_args(["x", "-o", "x", "--film", "trix", "--dev", "11", "--grain-dev", "1.3"]))
 check("granularity factor at 11 minutes, (0.86 / 0.56)^1.3", twb2.development_grain(p), (0.860 / 0.56) ** 1.3, 0.02)
-p = twb2.prepare(twb2.parser().parse_args(["x", "-o", "x", "--dev", "norm-1952"]))
+p = twb2.prepare(twb2.parser().parse_args(["x", "-o", "x", "--film", "trix", "--dev", "norm-1952"]))
 check("gamma of the 1952 norm", twb2.curve_gamma(*twb2.film_curve(p.dev)), 0.83, 0.005)
+twb2.select_film("trix-1956")
+D = twb2.add_grain(np.full((k * 300, k * 300), 1.0, np.float32), side / k, 1.0, np.random.default_rng(0))
+check("granularity of the 1956 Tri-X setting", float(D.reshape(300, k, 300, k).mean(axis=(1, 3)).std() * 1000), 22.0, 0.5)
 twb2.select_film("trix")
 
 print("\nALL CHECKS PASSED" if ok else "\nSOME CHECKS FAILED")

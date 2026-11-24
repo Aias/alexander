@@ -545,15 +545,16 @@ def parser():
     ap.add_argument("--bits", type=int, choices=(8, 16), default=8)
     ap.add_argument("--seed", type=int, default=1)
     g = ap.add_argument_group("negative")
-    g.add_argument("--film", choices=sorted(FILMS), default="trix",
-                   help="trix: Kodak Tri-X Pan from its datasheet (default). trix-1956: the same curves with "
-                        "the coarser grain and lower sharpness Kodak classed Tri-X at in 1956 [estimated]. "
-                        "doublex: Eastman Double-X 5222, an emulsion of 1959")
+    g.add_argument("--film", choices=sorted(FILMS), default="trix-1956",
+                   help="trix-1956: Tri-X with the coarser grain and lower sharpness Kodak classed it at in "
+                        "1956 (default, preferred in blind comparison; its two numbers are estimates). "
+                        "trix: Kodak Tri-X Pan from its datasheet. doublex: Eastman Double-X 5222, an "
+                        "emulsion of 1959")
     g.add_argument("--film-mm", type=float, default=24.0,
                    help="long edge of the piece of film the picture fills: 36 = a whole 35mm frame, 24 = a "
                         "moderate crop of one (default), 18 = half-frame, 56 = 6x4.5")
     g.add_argument("--filter", choices=sorted(FILM["rgb_weights"]), default="none", help="lens filter")
-    g.add_argument("--lens-um", type=float, default=5.0,
+    g.add_argument("--lens-um", type=float, default=8.0,
                    help="softness of the picture on the film, as a blur radius in micrometres: lens, focus, "
                         "camera movement and losses from copying. Applied before development, so grain is "
                         "not softened. 0 is off; the reference scans, at the size of a book page, sit "
