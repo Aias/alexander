@@ -70,37 +70,37 @@ pts = twb2.POLYMAX["curves_logH_density"]["3"]
 px, py = twb2.paper_curve(3.0)
 check("paper curve at grade 3, worst point", max(abs(np.interp(a, px, py) - b) for a, b in pts), 0.0, 0.02)
 
-# 4. The same picture at two pixel counts
-print("4. resolution independence (press on, the same picture at 1000 px and at 3000 px reduced to 1000)")
-photos = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "photos")
-found = sorted(f for f in os.listdir(photos) if f.lower().endswith((".jpg", ".jpeg", ".png", ".tif", ".tiff"))) if os.path.isdir(photos) else []
-if found:
-    src = os.path.join(photos, found[0])
-    load = lambda work: twb2.load_linear(src, work)
-else:                                   # no photo to hand: a synthetic scene with gradients, edges and texture
-    def load(work):
-        h = work * 2 // 3
-        yy, xx = np.mgrid[0:h, 0:work].astype(np.float32) / work
-        img = 0.05 + 0.5 * xx + 0.25 * np.sin(18 * xx) * np.sin(14 * yy) + 0.3 * ((xx - 0.6) ** 2 + (yy - 0.3) ** 2 < 0.02)
-        img += 0.2 * (np.floor(xx * 12) % 2) * (yy > 0.45)
-        return np.repeat(np.clip(img, 0.01, 1.0)[..., None], 3, -1).astype(np.float32)
-    src = "x"
+# 4. The same picture supplied at two pixel counts
+print("4. resolution independence (the same picture supplied at 1500 px and at 4500 px, default settings)")
+import contextlib
+import io
+import tempfile
+
+
+def scene(width):
+    """A synthetic scene with gradients, edges and texture, as an 8-bit image."""
+    h = width * 2 // 3
+    yy, xx = np.mgrid[0:h, 0:width].astype(np.float32) / width
+    img = 0.05 + 0.5 * xx + 0.25 * np.sin(18 * xx) * np.sin(14 * yy) + 0.3 * ((xx - 0.6) ** 2 + (yy - 0.3) ** 2 < 0.02)
+    img += 0.2 * (np.floor(xx * 12) % 2) * (yy > 0.45)
+    return Image.fromarray((np.clip(img, 0.01, 1.0) ** (1 / 2.2) * 255).astype(np.uint8)).convert("RGB")
+
+
 outs = []
-for work in (1000, 3000):
-    q = twb2.parser().parse_args([src, "-o", "x", "--ev", "0.8", "--repro", "book", "--page-mm", "200"])
-    q.view = "scan"
-    img = twb2.render(load(work), q)[..., 0]
-    if work != 1000:
-        k = work // 1000
-        img = img[:img.shape[0] // k * k, :img.shape[1] // k * k].reshape(img.shape[0] // k, k, img.shape[1] // k, k).mean(axis=(1, 3))
-    outs.append(img)
+with tempfile.TemporaryDirectory() as tmp:
+    for width in (1500, 4500):
+        src, dst = os.path.join(tmp, f"in{width}.png"), os.path.join(tmp, f"out{width}.png")
+        scene(width).save(src)
+        with contextlib.redirect_stdout(io.StringIO()):
+            twb2.main([src, "-o", dst, "--auto-ev", "--out-long-edge", "1500"])
+        outs.append(np.asarray(Image.open(dst).convert("L"), dtype=np.float32) / 255)
 a, b = outs
-h, w = min(a.shape[0], b.shape[0]), min(a.shape[1], b.shape[1])
-a, b = a[:h, :w], b[:h, :w]
 for q in (5, 25, 50, 75, 95):
-    check(f"percentile {q}", float(np.percentile(b, q)), float(np.percentile(a, q)), 0.02)
+    check(f"percentile {q}", float(np.percentile(b, q)), float(np.percentile(a, q)), 0.01)
 tex = lambda im: float((im - ndi.gaussian_filter(im, 2.0))[(im > 0.3) & (im < 0.8)].std())
-check("fine texture in the greys", tex(b), tex(a), 0.004)
+check("fine texture in the greys", tex(b), tex(a), 0.002)
+check("average difference after smoothing away grain",
+      float(np.abs(ndi.gaussian_filter(a, 4.0) - ndi.gaussian_filter(b, 4.0)).mean()), 0.0, 0.005)
 
 print("\nALL CHECKS PASSED" if ok else "\nSOME CHECKS FAILED")
 sys.exit(0 if ok else 1)

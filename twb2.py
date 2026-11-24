@@ -5,8 +5,9 @@ physical chain those pictures went through, in physical units.
     scene -> Tri-X negative (curve, edge effects, grain) -> print on paper
           -> halftone on uncoated stock -> scan or page view
 
-Every length is in micrometres on the film or millimetres on the printed page, so the
-same settings give the same picture at 1,000 px and at 48 MP.
+Every length is in micrometres on the film or millimetres on the printed page, and the
+simulation runs on a grid of fixed size (--detail-px) before being enlarged to the output,
+so the same settings give the same picture at 1,000 px and at 48 MP.
 
     python3 twb2.py photo.jpg -o out.png --auto-ev                              # darkroom print
     python3 twb2.py photo.jpg -o out.png --auto-ev --repro book                 # + printing press
@@ -325,12 +326,18 @@ def parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input")
     ap.add_argument("-o", "--output", required=True)
-    ap.add_argument("--work-long-edge", type=int, help="resample the input to this size before simulating")
-    ap.add_argument("--out-long-edge", type=int, help="resample the result to this size when saving")
+    ap.add_argument("--detail-px", type=int, default=2560,
+                   help="long edge of the grid the negative and print are simulated on. The result is then "
+                        "enlarged to the output size, so grain and detail keep the same size relative to the "
+                        "picture whatever the file's pixel count. Lower is coarser and softer; 0 simulates at "
+                        "the input's own size")
+    ap.add_argument("--out-long-edge", type=int, help="long edge of the saved file (default: the input's)")
     ap.add_argument("--bits", type=int, choices=(8, 16), default=8)
     ap.add_argument("--seed", type=int, default=1)
     g = ap.add_argument_group("negative (Kodak Tri-X 400)")
-    g.add_argument("--film-mm", type=float, default=36.0, help="long edge of the film frame: 36 = 35mm, 56 = 6x4.5, 120 = 4x5")
+    g.add_argument("--film-mm", type=float, default=24.0,
+                   help="long edge of the piece of film the picture fills: 36 = a whole 35mm frame, 24 = a "
+                        "moderate crop of one (default), 18 = half-frame, 56 = 6x4.5")
     g.add_argument("--filter", choices=sorted(TRIX["rgb_weights"]), default="none", help="lens filter")
     g.add_argument("--ev", type=float, default=0.0, help="exposure in stops")
     g.add_argument("--auto-ev", type=float, nargs="?", const=0.45, default=None, metavar="TARGET")
@@ -372,7 +379,11 @@ def main(argv=None):
     p = parser().parse_args(argv)
     if p.view is None:
         p.view = "scan" if p.repro == "book" else "print"
-    rgb = load_linear(p.input, p.work_long_edge)
+    with Image.open(p.input) as im:
+        original = max(im.size)
+    if p.out_long_edge is None:
+        p.out_long_edge = original
+    rgb = load_linear(p.input, p.detail_px or original)
     save(render(rgb, p), p.output, p)
 
 

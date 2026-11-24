@@ -5,7 +5,8 @@ pictures in Christopher Alexander's *The Timeless Way of Building*.
 
 It does this by simulating the chain those pictures went through, with each stage in
 physical units: micrometres on a 35mm negative and millimetres on a printed page. The
-same settings therefore give the same picture at 1,000 px and at 48 megapixels.
+simulation runs on a grid 2,560 px across and is then enlarged to the size of your file,
+so the same settings give the same picture at 1,000 px and at 48 megapixels.
 
     scene -> Tri-X negative (curve, edge effects, grain) -> print on paper
           -> optional: halftone on uncoated stock -> optional: cream paper
@@ -19,7 +20,7 @@ python3 twb2.py photo.jpg -o out.png --auto-ev
 ```
 
 That renders a darkroom print: the negative developed, with grain, printed on grade 3
-paper. A 48 MP file takes about half a minute and 3 GB of memory.
+paper, saved at the size of the input. Add `--out-long-edge 5120` to save at a chosen size.
 
 Useful switches:
 
@@ -28,7 +29,8 @@ Useful switches:
 | `--auto-ev` | Sets exposure from the picture; `--ev` adds stops on top | off |
 | `--grade` | Paper grade, -1 (soft) to 5 (hard) | 3 |
 | `--print-ev` | Print exposure in stops; more is darker | -0.5 |
-| `--film-mm` | Long edge of the film frame: 36 is 35mm, 56 is medium format | 36 |
+| `--detail-px` | Long edge of the grid the film and print are simulated on before enlarging. Lower is coarser and softer; 0 uses the input's own size | 2560 |
+| `--film-mm` | Long edge of the piece of film the picture fills: 36 is a whole 35mm frame, 18 is half-frame, 56 is medium format. Smaller means more grain | 24 |
 | `--dev` | Development time in minutes, 6 to 11; longer is more contrast | 7 |
 | `--grain` | Granularity relative to the datasheet figure | 1.0 |
 | `--edge`, `--no-edge` | Strength of development edge effects | 1.0 |
@@ -50,9 +52,10 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 3. **Edge effects.** Dense areas hold back development nearby, which lifts contrast at
    edges and in small details. Applied to exposure before the curve, so it fades in
    blocked shadows and blown highlights.
-4. **Grain.** Each pixel holds a number of grains that follows from its area on the film.
-   The number developed is drawn from a Poisson distribution. No texture is added and no
-   noise is filtered: grain size comes from the film format and the pixel count.
+4. **Grain.** Each cell of the simulation grid holds a number of grains that follows from
+   its area on the film. The number developed is drawn from a Poisson distribution. No
+   texture is added and no noise is filtered: grain strength comes from the film format
+   and its apparent size from the grid.
 5. **Print.** The negative is printed on Kodak Polymax paper of the chosen grade.
 6. **Press (optional).** The print's density range is squeezed into what ink on uncoated
    paper can hold, dots gain on the press, and the screen and paper soften detail by a
@@ -84,7 +87,7 @@ python3 tools/calibrate.py
 This confirms that the simulated negative reads the datasheet granularity of 17 through
 a 48 micrometre aperture at three pixel sizes, that its sharpness follows the published
 curve, that the film and paper curves pass through the digitised points, and that a
-picture rendered at 1,000 px matches the same picture rendered at 3,000 px and reduced.
+picture supplied at 1,500 px and at 4,500 px renders the same.
 
 ## Files
 
