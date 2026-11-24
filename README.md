@@ -21,10 +21,12 @@ python3 twb2.py photo.jpg -o out.png --auto-ev
 ```
 
 That renders a darkroom print: a slightly soft image on the negative, developed, with
-grain, printed on grade 3 paper, saved at the size of the input.
+grain, printed on grade 3 paper, its tones then brought to the range the book's own pages
+share, saved at the size of the input.
 
-The film, the amount and shape of the softness, the edge-effect rule and the optional
-stages were chosen by blind comparison of renders. Add `--out-long-edge 5120` to save at a chosen size.
+The film, the shape of the softness, the edge-effect rule and the optional stages were
+chosen by blind comparison of renders. The tone range and the amount of softness were
+set against the book's own pages, measured from scans and judged with the pages alongside. Add `--out-long-edge 5120` to save at a chosen size.
 
 Useful switches:
 
@@ -34,7 +36,7 @@ Useful switches:
 | `--grade` | Paper grade, -1 (soft) to 5 (hard) | 3 |
 | `--print-ev` | Print exposure in stops; more is darker | -0.5 |
 | `--detail-px` | Long edge of the grid the film and print are simulated on before enlarging. Lower is coarser and softer; 0 uses the input's own size | 2560 |
-| `--lens-um` | Softness of the picture on the film, as a blur radius in micrometres. It acts before development, so grain stays crisp over the softened picture. 0 is off; the reference scans, at the size of a book page, sit between 10 and 30 | 8 |
+| `--lens-um` | Softness of the picture on the film, as a blur radius in micrometres. It acts before development, so grain stays crisp over the softened picture. 0 is off; the reference scans, at the size of a book page, sit between 10 and 30 | 10 |
 | `--lens-exponent` | Shape of that softness. 2 is a Gaussian. Lower values keep a sharp core and add a long faint skirt; published film sharpness curves sit near 1.15 | 1.15 |
 | `--halation` | Light reflected back from the film base as a wide glow around bright areas, as a fraction of the light. 0.02 to 0.08 covers films with weak protection against it | 0 (off) |
 | `--film` | `trix-1956`: Tri-X with the coarser grain and lower sharpness Kodak classed it at in 1956 (its two numbers are estimates). `trix`: Kodak Tri-X Pan from its datasheet. `doublex`: Eastman Double-X 5222, an emulsion of 1959 | trix-1956 |
@@ -45,7 +47,7 @@ Useful switches:
 | `--edge`, `--no-edge` | Strength of development edge effects | 1.0 |
 | `--edge-density` | How edge effects grow with the density of the negative. 0 uses the tone difference alone; 1 follows Nelson's measurement, which makes fringes stronger in the light parts of the picture | 0 |
 | `--filter` | Lens filter: `none`, `yellow`, `orange`, `red` | none |
-| `--house` | Pulls the picture's tones toward the range the book's own pages share, from 0 (off) to 1 (matched). The book's pages keep their shadows more open than a straight print | 0 |
+| `--house` | Pulls the picture's tones toward the range the book's own pages share, from 0 (a straight darkroom print) to 1 (matched). The book's pages keep their shadows more open than a straight print | 1 |
 | `--repro copy` | Shows the print as it looks after being printed in a book, re-photographed from the page and printed again, which is how the book's own pictures were made. Tuned with `--copy-blur`, `--copy-gain`, `--copy-drop`, `--copy-fill` | off |
 | `--repro book` | Adds the 1979 printing press: weak ink, tone compression, dot gain, softness | off |
 | `--view page` | With `--repro book`, shows true ink on cream paper | off |
@@ -77,7 +79,7 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
    measured on real film: at the default 7 minutes it is about 10% above the datasheet
    figure, which is quoted for a shorter development.
 5. **Print.** The negative is printed on Kodak Polymax paper of the chosen grade.
-6. **House tones (optional).** The book's makers copied every source to a common look:
+6. **House tones.** The book's makers copied every source to a common look:
    a pale picture gained contrast and a dark one was lightened. `--house` moves the
    picture's own tone percentiles part of the way to the book's, along a smooth curve.
 7. **Copied from a printed page (optional).** The print is printed once, which loses the
@@ -105,7 +107,8 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 | Halation as light reflected from the film base, about 65 micrometres wide on still film | The halation model in spektrafilm, re-implemented here |
 | Long-tailed softness, exponent near 1.15 | A fit of the 54 distinct film sharpness curves in spectral_film_lut: 51 fall off closer to exp(-f/fc) than to a Gaussian. Tri-X is the most Gaussian of them |
 | Highlight dots that drop out and shadow dots that fill in at each printing (5% and 95% nominal, 15% and 85% on a small press) | J. D. Corey, [Making PMT Halftone Prints](https://www.osti.gov/servlets/purl/7107710), Bendix, 1977 |
-| The tone range of the book's pages (display values 0.08, 0.12, 0.24, 0.55, 0.78, 0.95, 1.00 at the 2nd, 10th, 25th, 50th, 75th, 90th and 98th percentiles) | Medians over twelve picture pages of the book, measured from scans. The darkest tenth and quarter vary by only a few hundredths from page to page |
+| The tone range of the book's pages (display values 0.08, 0.11, 0.22, 0.55, 0.78, 0.95, 1.00 at the 2nd, 10th, 25th, 50th, 75th, 90th and 98th percentiles) | Twelve picture pages of the book, measured from scans. Medians, except the 10th and 25th, which are the lower quartile across pages (the medians are 0.12 and 0.24) so that shadows keep a little more depth |
+| Softness of 10 micrometres | The book's pages measure edge widths of 1.33 px (sharpest tenth) and 2.10 px (median) at 900 px on the long edge; renders at 10 to 11 land closest |
 | Solid ink density 1.20 on uncoated cream paper | Values published for the German offset process standard (paper type 5) |
 
 Tuned by eye or against reference scans, with no source: lens softness, halation

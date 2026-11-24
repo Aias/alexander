@@ -88,21 +88,33 @@ def scene(width):
     return Image.fromarray((np.clip(img, 0.01, 1.0) ** (1 / 2.2) * 255).astype(np.uint8)).convert("RGB")
 
 
-outs = []
-with tempfile.TemporaryDirectory() as tmp:
-    for width in (1500, 4500):
-        src, dst = os.path.join(tmp, f"in{width}.png"), os.path.join(tmp, f"out{width}.png")
-        scene(width).save(src)
-        with contextlib.redirect_stdout(io.StringIO()):
-            twb2.main([src, "-o", dst, "--auto-ev", "--out-long-edge", "1500"])
-        outs.append(np.asarray(Image.open(dst).convert("L"), dtype=np.float32) / 255)
-a, b = outs
+def two_sizes(extra):
+    """The same scene supplied at 1500 px and at 4500 px, rendered to 1500 px."""
+    outs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for width in (1500, 4500):
+            src, dst = os.path.join(tmp, f"in{width}.png"), os.path.join(tmp, f"out{width}.png")
+            scene(width).save(src)
+            with contextlib.redirect_stdout(io.StringIO()):
+                twb2.main([src, "-o", dst, "--auto-ev", "--out-long-edge", "1500", *extra])
+            outs.append(np.asarray(Image.open(dst).convert("L"), dtype=np.float32) / 255)
+    return outs
+
+
+tex = lambda im: float((im - ndi.gaussian_filter(im, 2.0))[(im > 0.3) & (im < 0.8)].std())
+# The film and print chain alone: the house-tone step is set aside because it reads the
+# picture's own tone percentiles, which this scene's flat steps make jumpy.
+a, b = two_sizes(["--house", "0"])
 for q in (5, 25, 50, 75, 95):
     check(f"percentile {q}", float(np.percentile(b, q)), float(np.percentile(a, q)), 0.01)
-tex = lambda im: float((im - ndi.gaussian_filter(im, 2.0))[(im > 0.3) & (im < 0.8)].std())
 check("fine texture in the greys", tex(b), tex(a), 0.002)
 check("average difference after smoothing away grain",
       float(np.abs(ndi.gaussian_filter(a, 4.0) - ndi.gaussian_filter(b, 4.0)).mean()), 0.0, 0.005)
+# With every default on, house tones included
+a, b = two_sizes([])
+check("with house tones: median", float(np.percentile(b, 50)), float(np.percentile(a, 50)), 0.01)
+check("with house tones: average difference after smoothing away grain",
+      float(np.abs(ndi.gaussian_filter(a, 4.0) - ndi.gaussian_filter(b, 4.0)).mean()), 0.0, 0.01)
 
 # 5. Double-X: the same checks of granularity, sharpness and curve against its own data
 print("5. Eastman Double-X 5222 (datasheet granularity 14)")

@@ -74,10 +74,12 @@ FILM_DMAX = 3.4              # net density the emulsion can reach (top of the da
 GRAIN_UNIFORMITY = 0.6       # black-and-white value used by spektrafilm
 PAPER_CREAM = (0.957, 0.937, 0.882)   # display colour of the uncoated stock [tuned]
 # The tone range the book's picture pages share: display values at these percentiles of a
-# page, as the median over twelve pages measured from scans. The darkest tenth and quarter
-# sit within a few hundredths of these values on every page measured.
+# page, measured from scans of twelve pages. The darkest tenth and quarter sit within a few
+# hundredths of the same values on every page; their medians are 0.12 and 0.24, and the two
+# values used here are the lower quartile across pages, chosen by eye with the pages alongside
+# so that buildings keep a little more depth in their shadows. The rest are medians.
 HOUSE_PCT = (2, 10, 25, 50, 75, 90, 98)
-HOUSE_VAL = (0.08, 0.12, 0.24, 0.55, 0.78, 0.95, 1.00)
+HOUSE_VAL = (0.08, 0.11, 0.22, 0.55, 0.78, 0.95, 1.00)
 
 
 # ---------- colour and file handling -------------------------------------------
@@ -554,7 +556,7 @@ def parser():
                    help="long edge of the piece of film the picture fills: 36 = a whole 35mm frame, 24 = a "
                         "moderate crop of one (default), 18 = half-frame, 56 = 6x4.5")
     g.add_argument("--filter", choices=sorted(FILM["rgb_weights"]), default="none", help="lens filter")
-    g.add_argument("--lens-um", type=float, default=8.0,
+    g.add_argument("--lens-um", type=float, default=10.0,
                    help="softness of the picture on the film, as a blur radius in micrometres: lens, focus, "
                         "camera movement and losses from copying. Applied before development, so grain is "
                         "not softened. 0 is off; the reference scans, at the size of a book page, sit "
@@ -591,9 +593,10 @@ def parser():
     g.add_argument("--print-grey", type=float, default=0.745,
                    help="print density a metered grey gets before --print-ev is applied (0.745 = 18%% grey)")
     g.add_argument("--enlarger-um", type=float, default=2.3, help="enlarger lens blur on the film, micrometres [tuned]")
-    g.add_argument("--house", type=float, default=0.0,
-                   help="pull the picture's tones toward the range the book's own pages share, from 0 (off) "
-                        "to 1 (matched). The book's pages keep their shadows more open than a straight print")
+    g.add_argument("--house", type=float, default=1.0,
+                   help="pull the picture's tones toward the range the book's own pages share, from 0 (a "
+                        "straight darkroom print) to 1 (matched, default). The book's pages keep their "
+                        "shadows more open than a straight print")
     g = ap.add_argument_group("copied from a printed page (with --repro copy)")
     g.add_argument("--copy-blur", type=float, default=0.35,
                    help="softness of the copy, in thousandths of the picture's long edge. The reference "
