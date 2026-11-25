@@ -6,6 +6,8 @@ use super::{App, Compare, ExportForm, Mode, SizeChoice};
 use alexander_studio::export::Format;
 use alexander_studio::params::Settings;
 use std::path::PathBuf;
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
 
 pub struct Shots {
     dir: PathBuf,
@@ -13,7 +15,7 @@ pub struct Shots {
     step: usize,
     frames: u32,
     idle: u32,
-    waiting_shot: Option<String>,
+    waiting_shot: Option<(String, Receiver<Arc<egui::ColorImage>>)>,
 }
 
 impl Shots {
@@ -24,31 +26,29 @@ impl Shots {
     }
 
     fn shot(&mut self, ctx: &egui::Context, name: &str) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
-        self.waiting_shot = Some(name.to_string());
+        let (tx, rx) = channel();
+        ctx.request_screenshot(move |image| {
+            let _ = tx.send(image);
+        });
+        self.waiting_shot = Some((name.to_string(), rx));
     }
 
     pub fn step(&mut self, app: &mut App, ctx: &egui::Context) {
         self.frames += 1;
-        if let Some(name) = self.waiting_shot.clone() {
-            let img = ctx.input(|i| {
-                i.events.iter().find_map(|e| match e {
-                    egui::Event::Screenshot { image, .. } => Some(image.clone()),
-                    _ => None,
-                })
-            });
-            if let Some(img) = img {
-                let [w, h] = img.size;
-                let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
-                let path = self.dir.join(format!("{name}.png"));
-                if let Some(buf) = image::RgbaImage::from_raw(w as u32, h as u32, bytes) {
-                    let _ = buf.save(&path);
-                    eprintln!("shot {}", path.display());
-                }
-                self.waiting_shot = None;
-                self.step += 1;
-                self.idle = 0;
+        if let Some((name, receiver)) = self.waiting_shot.take() {
+            let Ok(img) = receiver.try_recv() else {
+                self.waiting_shot = Some((name, receiver));
+                return;
+            };
+            let [w, h] = img.size;
+            let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
+            let path = self.dir.join(format!("{name}.png"));
+            if let Some(buf) = image::RgbaImage::from_raw(w as u32, h as u32, bytes) {
+                let _ = buf.save(&path);
+                eprintln!("shot {}", path.display());
             }
+            self.step += 1;
+            self.idle = 0;
             return;
         }
         // a few quiet frames in a row: everything asked for has been drawn

@@ -54,7 +54,7 @@ pub fn style(ctx: &egui::Context) {
     // egui's plain text is 4.4:1 on the dialogs' fill; a little brighter reads comfortably
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0f32, Color32::from_gray(176));
     ctx.set_visuals(v);
-    ctx.style_mut(|s| {
+    ctx.global_style_mut(|s| {
         s.spacing.item_spacing = vec2(6.0, 5.0);
         s.spacing.button_padding = vec2(10.0, 3.0);
         s.spacing.interact_size.y = 22.0;
@@ -64,6 +64,7 @@ pub fn style(ctx: &egui::Context) {
         s.text_styles.insert(egui::TextStyle::Small, FontId::proportional(11.0));
         s.text_styles.insert(egui::TextStyle::Heading, FontId::proportional(15.0));
         s.interaction.tooltip_delay = 0.6;
+        s.animation_time = 0.1;
     });
 }
 
@@ -75,7 +76,7 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
             ui.spacing_mut().button_padding.x = 4.0;
             let w = (ui.available_width() - 2.0 * (options.len() - 1) as f32) / options.len() as f32;
             for &(v, label, tip) in options {
-                let r = ui.add_sized([w, ui.available_height()], egui::SelectableLabel::new(*value == v, label));
+                let r = ui.add_sized([w, ui.available_height()], Button::selectable(*value == v, label));
                 let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
                 if r.clicked() {
                     *value = v;
@@ -120,25 +121,26 @@ fn centred(area: Rect, w: u32, h: u32, ppp: f32) -> Rect {
 }
 
 impl App {
-    pub(super) fn layout(&mut self, ctx: &egui::Context) -> Vec<Command> {
+    pub(super) fn layout(&mut self, ui: &mut Ui) -> Vec<Command> {
+        let ctx = &ui.ctx().clone();
         let mut actions = Vec::new();
-        self.toolbar(ctx);
+        self.toolbar(ui);
         let has_photos = !self.lib.is_empty();
         if has_photos && self.mode != Mode::Grid {
-            egui::TopBottomPanel::bottom("filmstrip").exact_height(92.0).frame(egui::Frame::NONE.fill(BAR)).show(ctx, |ui| self.filmstrip(ui));
+            egui::Panel::bottom("filmstrip").exact_size(92.0).frame(egui::Frame::NONE.fill(BAR)).show(ui, |ui| self.filmstrip(ui));
         }
         if has_photos {
-            let frame = egui::Frame::side_top_panel(&ctx.style()).inner_margin(Margin::symmetric(6, 10));
-            egui::SidePanel::right("rail").exact_width(44.0).resizable(false).frame(frame).show(ctx, |ui| self.rail(ui));
+            let frame = egui::Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(6, 10));
+            egui::Panel::right("rail").exact_size(44.0).resizable(false).frame(frame).show(ui, |ui| self.rail(ui));
         }
         if has_photos && self.panel {
-            let frame = egui::Frame::side_top_panel(&ctx.style()).inner_margin(Margin::symmetric(12, 10));
-            egui::SidePanel::right("controls").resizable(true).default_width(340.0).width_range(320.0..=460.0).frame(frame).show(ctx, |ui| self.panel_ui(ui, &mut actions));
+            let frame = egui::Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 10));
+            egui::Panel::right("controls").resizable(true).default_size(340.0).size_range(320.0..=460.0).frame(frame).show(ui, |ui| self.panel_ui(ui, &mut actions));
         }
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(VIEW_BG)).show(ctx, |ui| {
+        let area = egui::CentralPanel::default().frame(egui::Frame::NONE.fill(VIEW_BG)).show(ui, |ui| {
             if has_photos {
-                egui::TopBottomPanel::bottom("status").exact_height(30.0).frame(egui::Frame::NONE.fill(BAR).inner_margin(Margin::symmetric(10, 0))).show_inside(ui, |ui| self.status_bar(ui));
-                egui::CentralPanel::default().frame(egui::Frame::NONE).show_inside(ui, |ui| {
+                egui::Panel::bottom("status").exact_size(30.0).frame(egui::Frame::NONE.fill(BAR).inner_margin(Margin::symmetric(10, 0))).show(ui, |ui| self.status_bar(ui));
+                egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
                     match self.mode {
                         Mode::Grid => self.grid(ui),
                         Mode::Survey => self.survey(ui),
@@ -154,10 +156,12 @@ impl App {
             if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
                 ui.painter().rect_stroke(ui.max_rect().shrink(3.0), CornerRadius::same(6), Stroke::new(2.0f32, Color32::from_gray(160)), StrokeKind::Inside);
             }
-        });
+        })
+        .response
+        .rect;
         self.export_window(ctx);
         self.errors_window(ctx);
-        self.reference_ui(ctx);
+        self.reference_ui(ctx, area);
         actions
     }
 
@@ -250,7 +254,7 @@ impl App {
             self.entry(ui, "Show in Finder", "⌘R", Command::ShowInFinder);
             if ui.button(if paths.len() > 1 { "Copy File Paths" } else { "Copy File Path" }).clicked() {
                 ui.ctx().copy_text(paths.join("\n"));
-                ui.close_menu();
+                ui.close();
             }
             self.entry(ui, "Copy Image", "", Command::CopyImage);
             self.entry(ui, "Create Virtual Copy", "⌘'", Command::VirtualCopy);
@@ -271,7 +275,7 @@ impl App {
     /// A menu entry that runs `c`, enabled when it can run.
     pub(super) fn entry(&mut self, ui: &mut Ui, text: &str, keys: &str, c: Command) {
         if ui.add_enabled(self.can(&c), Button::new(text).shortcut_text(keys)).clicked() {
-            ui.close_menu();
+            ui.close();
             self.run(&ui.ctx().clone(), c);
         }
     }
@@ -297,7 +301,7 @@ impl App {
             return;
         }
         let x = img.left() + self.split * img.width();
-        let r = ui.interact(Rect::from_x_y_ranges(x - 6.0..=x + 6.0, img.y_range()), egui::Id::new(("divider", id)), Sense::click_and_drag());
+        let r = ui.interact(Rect::from_x_y_ranges(x - 6.0..=x + 6.0, img.y_range()), egui::Id::unique(("divider", id)), Sense::click_and_drag());
         if let Some(p) = r.interact_pointer_pos().filter(|_| r.dragged()) {
             self.split = ((p.x - img.left()) / img.width()).clamp(0.0, 1.0);
         }
@@ -360,7 +364,7 @@ impl App {
             let badge_w = mark.map_or(0.0, |(_, w)| w + 6.0);
             let mut job = LayoutJob::simple_singleline(item.title(), FontId::proportional(11.0), colour);
             job.wrap = TextWrapping::truncate_at_width(inner.width() - badge_w);
-            let name = ui.fonts(|f| f.layout_job(job));
+            let name = ui.fonts_mut(|f| f.layout_job(job));
             ui.painter().galley(pos2(inner.min.x, y - name.size().y / 2.0), name, colour);
             if let Some((t, w)) = mark {
                 ui.painter().image(t, Rect::from_min_size(pos2(inner.max.x - w, y - 5.5), vec2(w, 11.0)), uv(), LABEL);
@@ -380,7 +384,7 @@ impl App {
             return;
         }
         let at = Rect::from_center_size(cell.right_top() + vec2(-12.0, 12.0), vec2(18.0, 18.0));
-        let r = ui.interact(at, egui::Id::new(("star", id)), Sense::click()).on_hover_text("S");
+        let r = ui.interact(at, egui::Id::unique(("star", id)), Sense::click()).on_hover_text("S");
         let colour = if starred || r.hovered() { Color32::WHITE } else { LABEL };
         ui.painter().text(at.center(), Align2::CENTER_CENTER, if starred { "★" } else { "☆" }, FontId::proportional(13.0), colour);
         if r.clicked() {
@@ -424,7 +428,7 @@ impl App {
                     let id = self.lib.shown()[i];
                     let x = rect.min.x + gap + c as f32 * (w + gap);
                     let cell = Rect::from_min_size(pos2(x, rect.min.y), vec2(w, row_h));
-                    let r = ui.interact(cell, egui::Id::new(("cell", id)), Sense::click());
+                    let r = ui.interact(cell, egui::Id::unique(("cell", id)), Sense::click());
                     self.clicked(ui, id, &r);
                     if r.double_clicked() {
                         self.lib.click(id);
@@ -478,7 +482,7 @@ impl App {
         let (cw, ch) = (area.width() / cols as f32, area.height() / rows as f32);
         for (k, &id) in ids.iter().enumerate() {
             let cell = Rect::from_min_size(area.min + vec2((k % cols) as f32 * cw, (k / cols) as f32 * ch), vec2(cw, ch));
-            let r = ui.interact(cell, egui::Id::new(("tile", id)), Sense::click());
+            let r = ui.interact(cell, egui::Id::unique(("tile", id)), Sense::click());
             if r.clicked() {
                 if ui.input(|i| i.modifiers.command) {
                     self.lib.toggle(id);
@@ -522,7 +526,7 @@ impl App {
     fn detail(&mut self, ui: &mut Ui) {
         let ppp = ui.ctx().pixels_per_point();
         let rect = ui.max_rect();
-        let resp = ui.interact(rect, egui::Id::new("detail"), Sense::click_and_drag());
+        let resp = ui.interact(rect, egui::Id::unique("detail"), Sense::click_and_drag());
         let Some(id) = self.lib.focus else { return };
         self.photo_menu(&resp, id);
         if self.cropping.as_ref().is_some_and(|e| e.id == id) {
@@ -637,7 +641,7 @@ impl App {
             for i in first..last {
                 let id = self.lib.shown()[i];
                 let r = Rect::from_min_size(origin + vec2(gap + i as f32 * (cell.x + gap), gap), cell);
-                let resp = ui.interact(r, egui::Id::new(("strip", id)), Sense::click());
+                let resp = ui.interact(r, egui::Id::unique(("strip", id)), Sense::click());
                 self.clicked(ui, id, &resp);
                 if resp.clicked() {
                     self.zoom = None;

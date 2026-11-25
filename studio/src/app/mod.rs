@@ -484,7 +484,7 @@ impl App {
     fn keys(&mut self, ctx: &egui::Context) {
         // a dialog takes the keys: Return there means Export, not Detail, and
         // Delete must not take photos out of the library behind it
-        if ctx.wants_keyboard_input() || self.export_form.is_some() || !self.export_errors.is_empty() {
+        if ctx.egui_wants_keyboard_input() || self.export_form.is_some() || !self.export_errors.is_empty() {
             return;
         }
         let cmd = Modifiers::COMMAND;
@@ -736,10 +736,11 @@ impl eframe::App for App {
         }
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = &ui.ctx().clone();
         let t0 = std::time::Instant::now();
         self.poll(ctx);
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         if !dropped.is_empty() {
             self.import(dropped);
         }
@@ -760,7 +761,7 @@ impl eframe::App for App {
         if let Some(menu) = &menu {
             // a dialog keeps the menu's commands from the library behind it, and text being
             // typed keeps its own undo and select all
-            let typing = ctx.wants_keyboard_input();
+            let typing = ctx.egui_wants_keyboard_input();
             for c in menu.chosen() {
                 let held = typing && matches!(c, Command::Undo | Command::Redo | Command::SelectAll | Command::SelectNone);
                 if self.export_form.is_none() && self.export_errors.is_empty() && !held {
@@ -769,7 +770,7 @@ impl eframe::App for App {
             }
         }
         self.keys(ctx);
-        let actions = self.layout(ctx);
+        let actions = self.layout(ui);
         self.tiers.set_preview(self.preview_wanted.take());
         if self.cropping.as_ref().is_some_and(|e| self.lib.focus != Some(e.id) || self.mode != Mode::Detail) {
             self.finish_crop();

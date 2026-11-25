@@ -74,17 +74,17 @@ impl App {
                 r.context_menu(|ui| {
                     if ui.add_enabled(focus_look.is_some(), Button::new("Update with Current Look")).clicked() {
                         changed |= focus_look.as_ref().is_some_and(|l| save(&p.name, l).is_ok());
-                        ui.close_menu();
+                        ui.close();
                     }
                     #[cfg(target_os = "macos")]
                     if ui.button("Show in Finder").clicked() {
                         let file = file.clone();
                         std::thread::spawn(move || std::process::Command::new("/usr/bin/open").arg("-R").arg(file).status());
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("Delete").clicked() {
                         changed |= std::fs::remove_file(file).is_ok();
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
             }

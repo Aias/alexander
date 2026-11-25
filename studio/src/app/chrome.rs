@@ -8,7 +8,7 @@ use egui::{vec2, Align, Align2, Button, FontId, Key, Layout, Margin, Rect, RichT
 const DIALOG_BUTTON: egui::Vec2 = vec2(84.0, 26.0);
 
 fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
-    egui::Frame::window(&ctx.style()).inner_margin(Margin::same(18))
+    egui::Frame::window(&ctx.global_style()).inner_margin(Margin::same(18))
 }
 
 /// Buttons along the right edge of a dialog, first given rightmost.
@@ -18,9 +18,9 @@ fn dialog_buttons(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 }
 
 impl App {
-    pub(super) fn toolbar(&mut self, ctx: &egui::Context) {
-        let frame = egui::Frame::side_top_panel(&ctx.style()).inner_margin(Margin::symmetric(10, 0));
-        egui::TopBottomPanel::top("toolbar").exact_height(40.0).frame(frame).show(ctx, |ui| {
+    pub(super) fn toolbar(&mut self, ui: &mut Ui) {
+        let frame = egui::Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(10, 0));
+        egui::Panel::top("toolbar").exact_size(40.0).frame(frame).show(ui, |ui| {
             let bar = ui.max_rect();
             ui.horizontal_centered(|ui| {
                 if ui.button("Open…").on_hover_text("⌘O").clicked() {
@@ -143,7 +143,7 @@ impl App {
         let n = self.exportable();
         let ready = n > 0 && form.dir_ok;
         let (mut go, mut cancel, mut choose) = (false, false, None);
-        let modal = egui::Modal::new(egui::Id::new("export")).frame(dialog_frame(ctx)).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("export")).frame(dialog_frame(ctx)).show(ctx, |ui| {
             ui.set_width(340.0);
             ui.heading(if n == 1 { "Export 1 Photo".to_string() } else { format!("Export {n} Photos") });
             ui.add_space(12.0);
@@ -207,7 +207,7 @@ impl App {
             return;
         }
         let mut close = false;
-        let modal = egui::Modal::new(egui::Id::new("errors")).frame(dialog_frame(ctx)).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("errors")).frame(dialog_frame(ctx)).show(ctx, |ui| {
             ui.set_max_width(480.0);
             for e in self.export_errors.iter().take(12) {
                 ui.label(e);

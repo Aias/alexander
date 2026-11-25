@@ -167,8 +167,8 @@ impl App {
         let ratio = self.kept_ratio(&e, fw, fh);
         let corners = [frame.left_top(), frame.right_top(), frame.left_bottom(), frame.right_bottom()];
         let near = |p: Pos2| !frame.contains(p) && corners.iter().any(|c| c.distance(p) < 36.0);
-        let turn = ui.interact(rect, egui::Id::new("crop-turn"), Sense::drag());
-        let turning = egui::Id::new("crop-turning");
+        let turn = ui.interact(rect, egui::Id::unique("crop-turn"), Sense::drag());
+        let turning = egui::Id::unique("crop-turning");
         if turn.drag_started() {
             let at = ui.input(|i| i.pointer.press_origin()).is_some_and(near);
             ui.data_mut(|d| d.insert_temp(turning, at));
@@ -186,7 +186,7 @@ impl App {
             return;
         }
         let mut moved = None;
-        let inside = ui.interact(frame, egui::Id::new("crop-frame"), Sense::drag());
+        let inside = ui.interact(frame, egui::Id::unique("crop-frame"), Sense::drag());
         if inside.hovered() || inside.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::Grab);
         }
@@ -196,7 +196,7 @@ impl App {
         for (sx, sy) in [(-1, -1), (1, -1), (-1, 1), (1, 1), (0, -1), (0, 1), (-1, 0), (1, 0)] {
             let at = pos2(frame.center().x + sx as f32 * frame.width() / 2.0, frame.center().y + sy as f32 * frame.height() / 2.0);
             let handle = Rect::from_center_size(at, vec2(16.0, 16.0));
-            let r = ui.interact(handle, egui::Id::new(("crop-handle", sx, sy)), Sense::drag());
+            let r = ui.interact(handle, egui::Id::unique(("crop-handle", sx, sy)), Sense::drag());
             p.rect_filled(Rect::from_center_size(at, vec2(7.0, 7.0)), 1.0, if r.hovered() || r.dragged() { Color32::WHITE } else { LABEL });
             if r.hovered() || r.dragged() {
                 ui.ctx().set_cursor_icon(match (sx, sy) {
@@ -254,7 +254,7 @@ impl App {
 /// `out`, for turning the photo.
 fn turn_cursor(ctx: &egui::Context, at: Pos2, out: Vec2) {
     ctx.set_cursor_icon(CursorIcon::None);
-    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("turn-cursor")));
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("turn-cursor")));
     let (a0, c) = (out.angle(), at - out.normalized() * 7.0);
     let arc: Vec<Pos2> = (0..=10).map(|i| c + Vec2::angled(a0 - 0.8 + 0.16 * i as f32) * 9.0).collect();
     let heads = [(arc[0], -1.0), (arc[10], 1.0)].map(|(tip, turn)| {

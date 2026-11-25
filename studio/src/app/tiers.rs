@@ -404,7 +404,7 @@ impl Tiers {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
         });
         let view = texture.create_view(&Default::default());
         (texture, view)
@@ -425,17 +425,18 @@ impl Tiers {
         let resized = map.get(&id).is_none_or(|s| s.size != size);
         if resized {
             let (texture, tview) = self.surface(size);
+            let shown = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(wgpu::TextureFormat::Rgba8Unorm), ..Default::default() });
             let map = if thumbs { &mut self.thumbs } else { &mut self.canvases };
             match map.get_mut(&id) {
                 Some(s) => {
-                    self.renderer.write().update_egui_texture_from_wgpu_texture(&self.device, &tview, filter, s.id);
+                    self.renderer.write().update_egui_texture_from_wgpu_texture(&self.device, &shown, filter, s.id);
                     s.texture.destroy();
                     s.texture = texture;
                     s.view = tview;
                     s.size = size;
                 }
                 None => {
-                    let tid = self.renderer.write().register_native_texture(&self.device, &tview, filter);
+                    let tid = self.renderer.write().register_native_texture(&self.device, &shown, filter);
                     map.insert(id, Surface { texture, view: tview, id: tid, size, key: None, used: frame });
                 }
             }

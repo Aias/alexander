@@ -132,7 +132,7 @@ impl Gpu {
             entries.push(tex_entry(b, false));
         }
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pass"), entries: &entries });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pass"), bind_group_layouts: &[&layout], push_constant_ranges: &[] });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pass"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("stages"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders/stages.wgsl").into()) });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("mirror"),
@@ -141,7 +141,7 @@ impl Gpu {
             address_mode_w: wgpu::AddressMode::MirrorRepeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor { label: Some("params"), size: SLOT_BYTES * SLOTS, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
@@ -195,7 +195,7 @@ impl Gpu {
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             })
         })
@@ -266,10 +266,11 @@ impl Gpu {
         let pipeline = &self.pipelines[&(pass, format)];
         let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(pass.entry()),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: target, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })],
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: target, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         rp.set_pipeline(pipeline);
         rp.set_bind_group(0, &group, &[offset as u32]);
@@ -295,10 +296,10 @@ impl Gpu {
         self.queue.submit([enc.finish()]);
         let slice = buffer.slice(..size);
         slice.map_async(wgpu::MapMode::Read, |_| {});
-        self.device.poll(wgpu::Maintain::Wait);
+        self.device.poll(wgpu::PollType::wait_indefinitely()).ok();
         let mut out = Vec::with_capacity((row * t.h) as usize);
         {
-            let data = slice.get_mapped_range();
+            let data = slice.get_mapped_range().unwrap();
             for y in 0..t.h as usize {
                 let start = y * padded as usize;
                 out.extend_from_slice(&data[start..start + row as usize]);
@@ -310,7 +311,7 @@ impl Gpu {
 
     /// Block until everything submitted so far has been drawn.
     pub fn finish(&self) {
-        self.device.poll(wgpu::Maintain::Wait);
+        self.device.poll(wgpu::PollType::wait_indefinitely()).ok();
     }
 }
 
@@ -331,15 +332,19 @@ fn make_tex(device: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat, 
 
 /// A device without a window, for tests and tools. None when the machine has no usable GPU.
 pub fn headless() -> Option<(wgpu::Device, wgpu::Queue, String)> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: None }))
-        .or_else(|| pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::LowPower, force_fallback_adapter: true, compatible_surface: None })))?;
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, ..Default::default() }))
+        .or_else(|_| pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::LowPower, force_fallback_adapter: true, ..Default::default() })))
+        .ok()?;
     let info = adapter.get_info();
     let limits = wgpu::Limits { max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.min(16384), ..wgpu::Limits::default() };
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor { label: Some("studio"), required_features: wanted_features(&adapter), required_limits: limits, memory_hints: wgpu::MemoryHints::Performance },
-        None,
-    ))
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("studio"),
+        required_features: wanted_features(&adapter),
+        required_limits: limits,
+        memory_hints: wgpu::MemoryHints::Performance,
+        ..Default::default()
+    }))
     .ok()?;
     Some((device, queue, format!("{} ({:?})", info.name, info.backend)))
 }

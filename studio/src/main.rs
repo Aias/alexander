@@ -20,6 +20,7 @@ fn main() -> eframe::Result {
                 // large photos at their own size want textures past eframe's 8192
                 required_limits: wgpu::Limits { max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.min(16384), ..base },
                 memory_hints: wgpu::MemoryHints::Performance,
+                ..Default::default()
             }
         });
     }

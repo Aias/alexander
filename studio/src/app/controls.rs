@@ -34,7 +34,7 @@ impl App {
         ui.add_space(10.0);
         ui.add_enabled_ui(enabled, |ui| header(ui, processed, actions));
         ui.add_space(6.0);
-        egui::TopBottomPanel::bottom("look").frame(egui::Frame::NONE.inner_margin(egui::Margin { top: 8, ..Default::default() })).show_inside(ui, |ui| {
+        egui::Panel::bottom("look").frame(egui::Frame::NONE.inner_margin(egui::Margin { top: 8, ..Default::default() })).show(ui, |ui| {
             ui.add_enabled_ui(enabled, |ui| footer(ui, processed, can_paste, actions));
         });
         let before = s.clone();
@@ -76,7 +76,7 @@ fn histogram(ui: &mut Ui, bins: Option<&[f32]>, clipping: &mut bool) {
     }
     let total: f32 = bins.iter().sum();
     for (corner, count, toward) in [(rect.left_top() + vec2(10.0, 10.0), bins[0], -1.0), (rect.right_top() + vec2(-10.0, 10.0), bins[bins.len() - 1], 1.0)] {
-        let r = ui.interact(Rect::from_center_size(corner, vec2(16.0, 16.0)), ui.id().with(("clip", corner.x as i32)), Sense::click()).on_hover_text("J");
+        let r = ui.interact(Rect::from_center_size(corner, vec2(16.0, 16.0)), ui.scope_id().with(("clip", corner.x as i32)), Sense::click()).on_hover_text("J");
         if r.clicked() {
             *clipping = !*clipping;
         }
@@ -104,7 +104,7 @@ fn header(ui: &mut Ui, processed: bool, actions: &mut Vec<Command>) {
             let mut item = |ui: &mut Ui, text: &str, enabled: bool, a: Command| {
                 if ui.add_enabled(enabled, Button::new(text)).clicked() {
                     actions.push(a);
-                    ui.close_menu();
+                    ui.close();
                 }
             };
             item(ui, "Save Look…", processed, Command::SaveLook);

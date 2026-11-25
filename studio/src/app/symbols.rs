@@ -19,5 +19,5 @@ pub fn symbol(name: &str, px: u32) -> Option<egui::ColorImage> {
     NSGraphicsContext::restoreGraphicsState_class();
     // SAFETY: the buffer holds `w` × `h` pixels of four bytes and lives as long as `rep`.
     let bytes = unsafe { std::slice::from_raw_parts(rep.bitmapData(), w * h * 4) };
-    Some(egui::ColorImage { size: [w, h], pixels: bytes.chunks(4).map(|p| egui::Color32::from_white_alpha(p[3])).collect() })
+    Some(egui::ColorImage::new([w, h], bytes.chunks(4).map(|p| egui::Color32::from_white_alpha(p[3])).collect()))
 }

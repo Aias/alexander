@@ -85,7 +85,7 @@ impl Reference {
 
 impl App {
     /// The reference, over the main window or in its own, when it is shown.
-    pub(super) fn reference_ui(&mut self, ctx: &egui::Context) {
+    pub(super) fn reference_ui(&mut self, ctx: &egui::Context, area: egui::Rect) {
         if !self.reference.shown {
             return;
         }
@@ -97,17 +97,17 @@ impl App {
         }
         if self.reference.apart {
             let builder = ViewportBuilder::default().with_title("Reference").with_inner_size([560.0, 440.0]).with_min_inner_size([240.0, 180.0]).with_drag_and_drop(true);
-            ctx.show_viewport_immediate(ViewportId::from_hash_of("reference"), builder, |ctx, _| {
-                egui::CentralPanel::default().show(ctx, |ui| self.reference_contents(ui));
-                let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+            ctx.show_viewport_immediate(ViewportId::from_hash_of("reference"), builder, |ui, _| {
+                egui::CentralPanel::default().show(ui, |ui| self.reference_contents(ui));
+                let dropped: Vec<PathBuf> = ui.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
                 self.reference.add(dropped);
-                if ctx.input(|i| i.viewport().close_requested()) {
+                if ui.input(|i| i.viewport().close_requested()) {
                     self.reference.shown = false;
                 }
             });
         } else {
             let mut open = true;
-            let corner = ctx.available_rect().right_top() + egui::vec2(-336.0, 16.0);
+            let corner = area.right_top() + egui::vec2(-336.0, 16.0);
             egui::Window::new("Reference").open(&mut open).resizable(true).collapsible(false).default_pos(corner).default_size([320.0, 260.0]).min_size([200.0, 150.0]).show(ctx, |ui| self.reference_contents(ui));
             self.reference.shown &= open;
         }
@@ -163,11 +163,11 @@ impl App {
             #[cfg(target_os = "macos")]
             if let (true, Some(p)) = (ui.button("Show in Finder").clicked(), self.reference.current().cloned()) {
                 std::thread::spawn(move || std::process::Command::new("/usr/bin/open").arg("-R").arg(p).status());
-                ui.close_menu();
+                ui.close();
             }
             if ui.button("Move to Trash").clicked() {
                 self.reference.remove();
-                ui.close_menu();
+                ui.close();
             }
         });
     }
