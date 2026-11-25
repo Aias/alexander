@@ -71,6 +71,9 @@ impl App {
                     }
                     self.switch(ui, self.zoom == Some(1.0), "100%", "⌘1", Command::Actual);
                     self.switch(ui, self.zoom.is_none(), "Fit", "⌘0", Command::Fit);
+                    ui.add_space(8.0);
+                    let starred = self.lib.focus.and_then(|f| self.lib.get(f)).is_some_and(|it| it.starred);
+                    self.switch(ui, starred, if starred { "★" } else { "☆" }, "S", Command::Star);
                 }
                 _ => {}
             }
@@ -83,7 +86,7 @@ impl App {
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 let starred_only = self.lib.starred_only();
-                self.switch(ui, starred_only, "★", "Starred photos only", Command::StarredOnly);
+                self.switch(ui, starred_only, "Starred Only", "", Command::StarredOnly);
                 if self.opening > 0 || self.copy_image.is_some() {
                     ui.add(egui::Spinner::new().size(12.0).color(LABEL));
                 }

@@ -315,7 +315,7 @@ impl App {
         if !starred && !ui.rect_contains_pointer(cell) {
             return;
         }
-        let at = Rect::from_center_size(cell.min + vec2(12.0, 12.0), vec2(18.0, 18.0));
+        let at = Rect::from_center_size(cell.right_top() + vec2(-12.0, 12.0), vec2(18.0, 18.0));
         let r = ui.interact(at, egui::Id::new(("star", id)), Sense::click()).on_hover_text("S");
         let colour = if starred || r.hovered() { Color32::WHITE } else { LABEL };
         ui.painter().text(at.center(), Align2::CENTER_CENTER, if starred { "★" } else { "☆" }, FontId::proportional(13.0), colour);

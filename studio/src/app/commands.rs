@@ -110,7 +110,10 @@ impl App {
                     None => self.lib.toggle_process(&ids),
                 }
             }
-            Command::Star => self.lib.toggle_starred(&self.lib.selection()),
+            Command::Star => {
+                let ids = if self.mode == Mode::Loupe { self.lib.focus.into_iter().collect() } else { self.lib.selection() };
+                self.lib.toggle_starred(&ids);
+            }
             Command::VirtualCopy => {
                 self.lib.duplicate(&self.lib.selection());
             }

@@ -54,9 +54,10 @@ focused photo, holds the compare switches, and holds the thumbnail size in the g
 the zoom in the loupe.
 
 A cell names its photo; on macOS the SF Symbol for film beside the name marks a photo
-the process is on for. A star marks the photos worth keeping. It shows in the corner of a starred photo's cell,
-and under the pointer in the corner of any other, where a click stars that photo alone.
-★ at the left of the bar shows only the starred photos; the arrow keys, ⇧-click and
+the process is on for. A star marks the photos worth keeping. It shows in the top-right corner of a starred photo's
+cell, and under the pointer in that corner of any other, where a click stars that photo
+alone. In the loupe the star in the bar under the photo, or S, stars the photo shown.
+Starred Only at the left of the bar shows only the starred photos; the arrow keys, ⇧-click and
 Select All then go through those alone. Opening photos shows every photo again.
 
 Before (`\`) shows the photo itself in place of its render. Split (Y) shows both, in
@@ -100,7 +101,7 @@ the menu; plain keys go to the window, which leaves them to text being typed.
 | ⌘A / ⌘D | Select all / none |
 | Delete or Backspace | Remove from the library (the file stays on disk; ⌘Z puts it back) |
 | V | Switch the process on or off for the selection |
-| S | Star the selection, or take its stars away |
+| S | Star the selection, or in the loupe the photo shown, or take the stars away |
 | ⌘' | Make a virtual copy of each selected photo |
 | ⌘R | Show the selected photos in the Finder |
 | ⇧R | Show or hide the reference |
