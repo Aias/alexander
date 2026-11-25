@@ -1,7 +1,7 @@
 //! The window's chrome: the toolbar, the status bar under the view, and the dialogs.
 
 use super::views::{segmented, LABEL};
-use super::{controls, paths, App, Dialog, Mode, SizeChoice};
+use super::{controls, paths, App, Compare, Dialog, Mode, SizeChoice};
 use alexander_studio::export::Format;
 use egui::{vec2, Align, Align2, Button, FontId, Key, Layout, Margin, Rect, RichText, Ui};
 
@@ -79,7 +79,14 @@ impl App {
                 Mode::Survey => {}
             }
             ui.add_space(8.0);
-            ui.toggle_value(&mut self.before, "Before").on_hover_text("\\");
+            if self.compare == Compare::Split && ui.selectable_label(self.split_swap, "Swap").clicked() {
+                self.split_swap = !self.split_swap;
+            }
+            for (c, label, keys) in [(Compare::Split, "Split", "Y"), (Compare::Before, "Before", "\\")] {
+                if ui.selectable_label(self.compare == c, label).on_hover_text(keys).clicked() {
+                    self.toggle_compare(c);
+                }
+            }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 if self.opening > 0 {
                     ui.add(egui::Spinner::new().size(12.0).color(LABEL));

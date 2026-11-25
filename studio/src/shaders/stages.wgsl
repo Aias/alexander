@@ -380,11 +380,12 @@ fn fs_mip(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 // v0 = (origin x, y in picture pixels, picture pixels per screen pixel, pyramid level)
 // v1 = (view: 0 print, 1 scan, 2 page; encoded solid ink; scan black; scan white)
 // v2 = (paper colour r, g, b; dither strength)
-// v3 = (1 to show the photo itself, 1 to write display values unconverted)
+// v3 = (first canvas column showing the photo itself, 1 to write display values
+//       unconverted, the column after the last showing it)
 // t0 the finished picture with its pyramid, t1 the photo
 
-fn texel(p: vec2<i32>, lvl: i32) -> vec3<f32> {
-    if (u.v[3].x > 0.5) {
+fn texel(p: vec2<i32>, lvl: i32, src: bool) -> vec3<f32> {
+    if (src) {
         let size = vec2<i32>(textureDimensions(t1));
         return textureLoad(t1, clamp(p, vec2<i32>(0), size - 1), 0).rgb;
     }
@@ -392,11 +393,11 @@ fn texel(p: vec2<i32>, lvl: i32) -> vec3<f32> {
     return vec3<f32>(textureLoad(t0, clamp(p, vec2<i32>(0), size - 1), lvl).r);
 }
 
-fn sample_picture(pos: vec2<f32>) -> vec3<f32> {
+fn sample_picture(pos: vec2<f32>, src: bool) -> vec3<f32> {
     let s = u.v[0].z;
     let c = u.v[0].xy + pos * s;
     if (s <= 0.5) {
-        return texel(vec2<i32>(floor(c)), 0);          // enlarged twice or more: show the pixels
+        return texel(vec2<i32>(floor(c)), 0, src);          // enlarged twice or more: show the pixels
     }
     if (s <= 1.0) {
         let b = vec2<i32>(floor(c - 0.5));
@@ -404,7 +405,7 @@ fn sample_picture(pos: vec2<f32>) -> vec3<f32> {
         for (var j = -1; j <= 2; j++) {
             for (var i = -1; i <= 2; i++) {
                 let q = b + vec2<i32>(i, j);
-                acc += cubic(c.x - (f32(q.x) + 0.5)) * cubic(c.y - (f32(q.y) + 0.5)) * texel(q, 0);
+                acc += cubic(c.x - (f32(q.x) + 0.5)) * cubic(c.y - (f32(q.y) + 0.5)) * texel(q, 0, src);
             }
         }
         return max(acc, vec3<f32>(0.0));
@@ -422,7 +423,7 @@ fn sample_picture(pos: vec2<f32>) -> vec3<f32> {
         let wy = min(hi.y, f32(y + 1)) - max(lo.y, f32(y));
         for (var x = i0.x; x <= i1.x; x++) {
             let w = wy * (min(hi.x, f32(x + 1)) - max(lo.x, f32(x)));
-            acc += w * texel(vec2<i32>(x, y), lvl);
+            acc += w * texel(vec2<i32>(x, y), lvl, src);
             ws += w;
         }
     }
@@ -431,9 +432,10 @@ fn sample_picture(pos: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_canvas(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let r = sample_picture(pos.xy);
+    let src = pos.x >= u.v[3].x && pos.x < u.v[3].z;
+    let r = sample_picture(pos.xy, src);
     var enc: vec3<f32>;
-    if (u.v[3].x > 0.5) {
+    if (src) {
         enc = vec3<f32>(lin_to_srgb(r.r), lin_to_srgb(r.g), lin_to_srgb(r.b));
     } else if (u.v[1].x > 1.5) {
         let c = clamp(r.r, 0.0, 1.0) * u.v[2].rgb;

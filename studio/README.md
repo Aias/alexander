@@ -41,8 +41,20 @@ again from the original file, so changing a look never processes a processed pic
 Three views, named as in Lightroom: Grid, all photos (G); Survey, the selected photos side
 by side (N); and Loupe, one photo large (E, Return, or double-click). Survey and Loupe
 have a filmstrip. The bar under the view counts the photos and the selection, names the
-focused photo, switches Before on and off, and holds the thumbnail size in the grid and
+focused photo, holds the compare switches, and holds the thumbnail size in the grid and
 the zoom in the loupe.
+
+Before (`\`) shows the photo itself in place of its render. Split (Y) shows both, in
+Survey and Loupe, with the photo itself left of a divider and the render right of it. Drag
+the divider to move it, and press Swap to put the photo itself on the right. Moving the
+divider draws the picture again without rendering it again.
+
+Right-clicking a photo opens a menu of what can be done to it: open it in the loupe, show
+it in the Finder, copy its file path, copy its finished picture as an image, switch the
+process on or off, copy, paste or reset its look, export it, or remove it from the
+library. As in the Finder, a photo outside the selection becomes the selection first, so
+the commands act on every photo selected. Copy Image copies the photo clicked at the size
+of its simulation grid, cut to the picture inside its border when the look strips it.
 
 | Keys | Does |
 | --- | --- |
@@ -53,13 +65,14 @@ the zoom in the loupe.
 | Esc | Back to the grid |
 | Arrow keys | Next or previous photo; ⇧ extends the selection in the library |
 | ⌘A / ⌘D | Select all / none |
-| Delete or Backspace | Remove from the library (the file stays on disk) |
+| Delete or Backspace | Remove from the library (the file stays on disk; ⌘Z puts it back) |
 | V | Switch the process on or off for the selection |
-| \\ | Before and after |
+| \\ | Before |
+| Y | Split before and after |
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |
-| ⇧⌘R | Reset the selection to the original |
+| ⇧⌘R | Reset the film settings of the selection to the defaults |
 | ⌘Z / ⇧⌘Z | Undo and redo changes to looks |
-| Z, or double-click | Loupe: fit or 100% |
+| Z, or click | Loupe: fit, or 100% about the point clicked |
 | ⌘0 / ⌘1 | Loupe: fit / 100% |
 | ⌘+ / ⌘− | Zoom in and out; in the library, larger and smaller thumbnails |
 | Scroll or pinch | Loupe: zoom about the pointer |
@@ -74,8 +87,10 @@ picture inside, in every view and thumbnail, without rendering again; Off does n
 
 The knobs are grouped as the process runs: Film, Exposure, Lens, Grain, Edge Effects
 (switched on and off at its heading), Print, Reproduction and Simulation. Clicking a
-heading opens or closes it. Double-clicking a knob or its name restores its default; its
-value can also be dragged or typed. Copy, Paste and Reset sit under the knobs, and the
+heading opens or closes it. A setting off its default underlines its name under the
+pointer, and clicking the name restores the default; double-clicking a slider does the
+same. A slider's value can also be dragged or typed. Stock, Filter, Border and Finish are
+rows of toggles; the full names of the stocks and finishes are in their tooltips. Copy, Paste and Reset sit under the knobs, and the
 panel's … menu saves and loads looks as JSON and copies the look as `twb2.py` flags. In
 the loupe 100% means one pixel of the simulation grid to one pixel of the screen.
 
@@ -169,5 +184,4 @@ and quit.
   JSON, not in a catalogue.
 - Exporting reads each finished picture back from the GPU on the interface thread, so the
   window pauses for a moment per photo while an export runs.
-- Removing photos from the library cannot be undone; their looks go with them.
 - Speed has been measured only on a software GPU, where absolute numbers mean little.

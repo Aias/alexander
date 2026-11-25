@@ -68,9 +68,8 @@ struct DrawKey {
     /// screen while the new one is made.
     complete: bool,
     gen: u64,
-    canvas: [u32; 3],
+    canvas: [u32; 5],
     size: [u32; 2],
-    source: bool,
 }
 
 struct Surface {
@@ -433,7 +432,7 @@ impl Tiers {
         let p = item.proxy.as_ref()?;
         let source = before || item.look.is_none();
         let canvas = thumb_canvas(item, (p.w, p.h), size, source);
-        Some(DrawKey { tier: Tier::Proxy, complete: true, gen: item.gen, canvas: canvas_bits(&canvas), size, source })
+        Some(DrawKey { tier: Tier::Proxy, complete: true, gen: item.gen, canvas: canvas_bits(&canvas), size })
     }
 
     /// The key of a canvas of `item` drawn from a current render at `tier`. A full grid
@@ -445,7 +444,7 @@ impl Tiers {
             Tier::Full => grid.0,
         };
         let c = scaled(canvas, pw, grid, before || item.look.is_none());
-        Some(DrawKey { tier, complete: true, gen: item.gen, canvas: canvas_bits(&c), size, source: c.show_source })
+        Some(DrawKey { tier, complete: true, gen: item.gen, canvas: canvas_bits(&c), size })
     }
 
     /// Mark a photo on the GPU as needed this frame, so it is not let go of.
@@ -463,7 +462,7 @@ impl Tiers {
         }
         let source = before || item.look.is_none();
         let canvas = thumb_canvas(item, res.photo.size(), size, source);
-        let key = DrawKey { tier: Tier::Proxy, complete: !res.stale(item), gen: item.gen, canvas: canvas_bits(&canvas), size, source };
+        let key = DrawKey { tier: Tier::Proxy, complete: !res.stale(item), gen: item.gen, canvas: canvas_bits(&canvas), size };
         let view = Self::view_of(res, item);
         self.draw_into(true, item.id, Tier::Proxy, key, canvas, view, wgpu::FilterMode::Linear);
     }
@@ -479,7 +478,7 @@ impl Tiers {
             return;
         }
         let c = scaled(canvas, res.photo.size().0, grid, before || item.look.is_none());
-        let key = DrawKey { tier, complete: !res.stale(item), gen: item.gen, canvas: canvas_bits(&c), size, source: c.show_source };
+        let key = DrawKey { tier, complete: !res.stale(item), gen: item.gen, canvas: canvas_bits(&c), size };
         let view = Self::view_of(res, item);
         self.draw_into(false, item.id, tier, key, c, view, wgpu::FilterMode::Nearest);
     }
@@ -585,10 +584,12 @@ impl Tiers {
 /// Width, height and display values, four floats a pixel.
 pub type Display = (u32, u32, Vec<f32>);
 
-/// `canvas`, given in the coordinates of a full grid of `grid`, for a photo `pw` wide.
-fn scaled(canvas: Canvas, pw: u32, grid: (u32, u32), source: bool) -> Canvas {
+/// `canvas`, given in the coordinates of a full grid of `grid`, for a photo `pw` wide;
+/// showing the photo itself throughout when `photo`.
+fn scaled(canvas: Canvas, pw: u32, grid: (u32, u32), photo: bool) -> Canvas {
     let k = pw as f32 / grid.0 as f32;
-    Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, show_source: source }
+    let source = if photo { Canvas::PHOTO } else { canvas.source };
+    Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, source }
 }
 
 /// The part of a `size` picture of `item` that is shown: top-left corner and size.
@@ -605,9 +606,9 @@ fn within(item: &Item, size: (u32, u32)) -> ([f32; 2], (u32, u32)) {
 /// A thumbnail of `size` drawn from the proxy, of `proxy` pixels.
 fn thumb_canvas(item: &Item, proxy: (u32, u32), size: [u32; 2], source: bool) -> Canvas {
     let (origin, (w, _)) = within(item, proxy);
-    Canvas { origin, scale: w as f32 / size[0] as f32, show_source: source }
+    Canvas { origin, scale: w as f32 / size[0] as f32, source: if source { Canvas::PHOTO } else { Canvas::RENDER } }
 }
 
-fn canvas_bits(c: &Canvas) -> [u32; 3] {
-    [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits()]
+fn canvas_bits(c: &Canvas) -> [u32; 5] {
+    [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits(), c.source[0].to_bits(), c.source[1].to_bits()]
 }

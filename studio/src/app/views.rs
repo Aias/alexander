@@ -1,10 +1,11 @@
 //! Laying out the window: the three views, the filmstrip and where the panels go.
 
-use super::{controls, App, Mode};
+use super::{controls, App, Compare, Mode};
 use alexander_studio::engine::Canvas;
 use alexander_studio::library::{Id, Status};
+use alexander_studio::plan::Planner;
 use egui::text::{LayoutJob, TextWrapping};
-use egui::{pos2, vec2, Align2, Color32, CornerRadius, CursorIcon, FontId, Margin, Rect, Sense, Stroke, StrokeKind, Ui};
+use egui::{pos2, vec2, Align2, Button, Color32, CornerRadius, CursorIcon, FontId, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 
 pub const VIEW_BG: Color32 = Color32::from_gray(22);
 pub const BAR: Color32 = Color32::from_gray(29);
@@ -72,10 +73,12 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
     egui::Frame::NONE.fill(VIEW_BG).corner_radius(CornerRadius::same(6)).inner_margin(2.0).show(ui, |ui| {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            ui.spacing_mut().button_padding.x = 4.0;
             let w = (ui.available_width() - 2.0 * (options.len() - 1) as f32) / options.len() as f32;
-            for &(v, label, keys) in options {
+            for &(v, label, tip) in options {
                 let r = ui.add_sized([w, ui.available_height()], egui::SelectableLabel::new(*value == v, label));
-                if r.on_hover_text(keys).clicked() {
+                let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
+                if r.clicked() {
                     *value = v;
                 }
             }
@@ -96,6 +99,14 @@ fn uv() -> Rect {
     Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))
 }
 
+/// A dark label over a picture, with its corner `align` at `at`.
+fn pill(ui: &Ui, at: Pos2, align: Align2, text: &str) {
+    let g = ui.painter().layout_no_wrap(text.into(), FontId::proportional(11.5), Color32::from_gray(230));
+    let pill = align.anchor_size(at, g.size() + vec2(16.0, 8.0));
+    ui.painter().rect_filled(pill, CornerRadius::same(5), Color32::from_black_alpha(170));
+    ui.painter().galley(pill.min + vec2(8.0, 4.0), g, Color32::WHITE);
+}
+
 /// A rectangle of `w` x `h` physical pixels centred in `area`, on pixel boundaries.
 fn centred(area: Rect, w: u32, h: u32, ppp: f32) -> Rect {
     let a = px(area, ppp);
@@ -114,7 +125,7 @@ impl App {
         }
         if has_photos && self.panel {
             let frame = egui::Frame::side_top_panel(&ctx.style()).inner_margin(Margin::symmetric(12, 10));
-            egui::SidePanel::right("controls").resizable(true).default_width(300.0).width_range(272.0..=440.0).frame(frame).show(ctx, |ui| self.panel_ui(ui, &mut actions));
+            egui::SidePanel::right("controls").resizable(true).default_width(340.0).width_range(320.0..=460.0).frame(frame).show(ctx, |ui| self.panel_ui(ui, &mut actions));
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(VIEW_BG)).show(ctx, |ui| {
             if has_photos {
@@ -125,12 +136,8 @@ impl App {
                         Mode::Survey => self.survey(ui),
                         Mode::Loupe => self.loupe(ui),
                     }
-                    if self.before {
-                        let r = ui.max_rect();
-                        let g = ui.painter().layout_no_wrap("Before".into(), FontId::proportional(11.5), Color32::from_gray(230));
-                        let pill = Rect::from_min_size(r.min + vec2(12.0, 12.0), g.size() + vec2(16.0, 8.0));
-                        ui.painter().rect_filled(pill, CornerRadius::same(5), Color32::from_black_alpha(170));
-                        ui.painter().galley(pill.min + vec2(8.0, 4.0), g, Color32::WHITE);
+                    if self.before() {
+                        pill(ui, ui.max_rect().min + vec2(12.0, 12.0), Align2::LEFT_TOP, "Before");
                     }
                 });
             } else {
@@ -156,6 +163,111 @@ impl App {
             } else {
                 self.lib.click(id);
             }
+        }
+    }
+
+    /// The menu a right click on a photo opens. As in Finder, a photo outside the selection
+    /// becomes the selection first, so the commands act on what is selected; the photo
+    /// clicked becomes the focused one, whose look and picture are copied.
+    fn photo_menu(&mut self, r: &egui::Response, id: Id) {
+        if r.secondary_clicked() {
+            if self.lib.selected().contains(&id) {
+                self.lib.focus = Some(id);
+            } else {
+                self.lib.click(id);
+            }
+        }
+        r.context_menu(|ui| {
+            ui.set_min_width(230.0);
+            let item = |ui: &mut Ui, text: &str, keys: &str, enabled: bool| {
+                let clicked = ui.add_enabled(enabled, Button::new(text).shortcut_text(keys)).clicked();
+                if clicked {
+                    ui.close_menu();
+                }
+                clicked
+            };
+            let ctx = ui.ctx().clone();
+            let ids = self.lib.selected().clone();
+            let paths: Vec<_> = ids.iter().filter_map(|&i| self.lib.get(i)).map(|it| it.path.clone()).collect();
+            let looked = self.lib.get(id).is_some_and(|it| it.look.is_some());
+            let off = ids.iter().any(|&i| self.lib.get(i).is_some_and(|it| it.look.is_none()));
+            if item(ui, "Open in Loupe", "↩", self.mode != Mode::Loupe) {
+                self.mode = Mode::Loupe;
+                self.zoom = None;
+            }
+            #[cfg(target_os = "macos")]
+            if item(ui, "Show in Finder", "", true) {
+                let paths = paths.clone();
+                std::thread::spawn(move || std::process::Command::new("/usr/bin/open").arg("-R").args(paths).status());
+            }
+            if item(ui, if paths.len() > 1 { "Copy File Paths" } else { "Copy File Path" }, "", true) {
+                ctx.copy_text(paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"));
+            }
+            let ready = self.lib.get(id).is_some_and(|it| it.ready());
+            if item(ui, "Copy Image", "", ready && looked && self.copy_image.is_none()) {
+                self.copy_image = Some((id, Planner::new()));
+            }
+            ui.separator();
+            if item(ui, if off { "Turn Film On" } else { "Turn Film Off" }, "V", true) {
+                self.do_action(&ctx, controls::Action::Process(None));
+            }
+            if item(ui, "Copy Look", "⇧⌘C", looked) {
+                self.do_action(&ctx, controls::Action::CopyLook);
+            }
+            if item(ui, "Paste Look", "⇧⌘V", self.clipboard.is_some()) {
+                self.do_action(&ctx, controls::Action::PasteLook);
+            }
+            if item(ui, "Reset Look", "⇧⌘R", looked) {
+                self.do_action(&ctx, controls::Action::Reset);
+            }
+            ui.separator();
+            if item(ui, "Export…", "⇧⌘E", self.exportable() > 0 && self.export_run.is_none()) {
+                self.open_export();
+            }
+            ui.separator();
+            let remove = if ids.len() > 1 { format!("Remove {} Photos from Library", ids.len()) } else { "Remove from Library".to_string() };
+            if item(ui, &remove, "⌫", true) {
+                self.forget(&ids);
+            }
+        });
+    }
+
+    /// The canvas columns that show the photo itself in a split, for a canvas `w` pixels
+    /// wide across the picture.
+    fn split_source(&self, w: u32) -> [f32; 2] {
+        if self.compare != Compare::Split {
+            return Canvas::RENDER;
+        }
+        let x = self.split * w as f32;
+        if self.split_swap {
+            [x, Canvas::PHOTO[1]]
+        } else {
+            [Canvas::PHOTO[0], x]
+        }
+    }
+
+    /// The split's divider over a picture shown at `img`, dragged to move it, with each side
+    /// labelled when `named`.
+    fn divider(&mut self, ui: &Ui, id: Id, img: Rect, named: bool) {
+        if self.compare != Compare::Split {
+            return;
+        }
+        let x = img.left() + self.split * img.width();
+        let r = ui.interact(Rect::from_x_y_ranges(x - 6.0..=x + 6.0, img.y_range()), egui::Id::new(("divider", id)), Sense::drag());
+        if let Some(p) = r.interact_pointer_pos().filter(|_| r.dragged()) {
+            self.split = ((p.x - img.left()) / img.width()).clamp(0.0, 1.0);
+        }
+        if r.hovered() || r.dragged() {
+            ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+        }
+        let p = ui.painter().with_clip_rect(img);
+        p.vline(x, img.y_range(), Stroke::new(3.0f32, Color32::from_black_alpha(90)));
+        p.vline(x, img.y_range(), Stroke::new(1.0f32, Color32::WHITE));
+        p.circle(pos2(x, img.center().y), 7.0, Color32::from_black_alpha(170), Stroke::new(1.5f32, Color32::WHITE));
+        if named {
+            let (left, right) = if self.split_swap { ("After", "Before") } else { ("Before", "After") };
+            pill(ui, img.left_top() + vec2(12.0, 12.0), Align2::LEFT_TOP, left);
+            pill(ui, img.right_top() + vec2(-12.0, 12.0), Align2::RIGHT_TOP, right);
         }
     }
 
@@ -254,6 +366,7 @@ impl App {
                         self.zoom = None;
                     }
                     let hovered = r.hovered();
+                    self.photo_menu(&r, id);
                     if let Status::Failed(e) = &self.lib.get(id).unwrap().status {
                         r.on_hover_text(e.clone());
                     }
@@ -312,6 +425,7 @@ impl App {
                 self.mode = Mode::Loupe;
                 self.zoom = None;
             }
+            self.photo_menu(&r, id);
             let Some(item) = self.lib.get(id) else { continue };
             if !item.ready() {
                 continue;
@@ -323,11 +437,12 @@ impl App {
             let (iw, ih) = (((gw as f32 * z).round() as u32).max(1), ((gh as f32 * z).round() as u32).max(1));
             let img = centred(inner, iw, ih, ppp);
             let focused = self.lib.focus == Some(id);
-            let canvas = Canvas { origin, scale: gw as f32 / iw as f32, show_source: false };
+            let canvas = Canvas { origin, scale: gw as f32 / iw as f32, source: self.split_source(iw) };
             let tex = self.tiers.canvas(item, canvas, [iw, ih], if focused { 0 } else { 1 }).or_else(|| self.tiers.thumb_tex(id));
             if let Some(t) = tex {
                 ui.painter().image(t, img, uv(), Color32::WHITE);
             }
+            self.divider(ui, id, img, false);
             if focused && ids.len() > 1 {
                 ui.painter().rect_stroke(img.expand(4.0), CornerRadius::ZERO, Stroke::new(1.5f32, FOCUS_LINE), StrokeKind::Inside);
             }
@@ -338,7 +453,9 @@ impl App {
         let ppp = ui.ctx().pixels_per_point();
         let rect = ui.max_rect();
         let resp = ui.interact(rect, egui::Id::new("loupe"), Sense::click_and_drag());
-        let Some(item) = self.lib.focus.and_then(|f| self.lib.get(f)) else { return };
+        let Some(id) = self.lib.focus else { return };
+        self.photo_menu(&resp, id);
+        let Some(item) = self.lib.get(id) else { return };
         if !item.ready() {
             return;
         }
@@ -376,7 +493,7 @@ impl App {
             let d = resp.drag_delta();
             c = [c[0] - d.x * ppp / z, c[1] - d.y * ppp / z];
         }
-        if resp.double_clicked() {
+        if resp.clicked() {
             if self.zoom.is_some() {
                 self.zoom = None;
             } else if let Some(h) = resp.interact_pointer_pos() {
@@ -407,7 +524,7 @@ impl App {
             return;
         }
         let shown = from_px([x0, y0, x1, y1], ppp);
-        let canvas = Canvas { origin: [origin[0] + c[0] + (x0 as f32 - vc[0]) / z, origin[1] + c[1] + (y0 as f32 - vc[1]) / z], scale: 1.0 / z, show_source: false };
+        let canvas = Canvas { origin: [origin[0] + c[0] + (x0 as f32 - vc[0]) / z, origin[1] + c[1] + (y0 as f32 - vc[1]) / z], scale: 1.0 / z, source: self.split_source((x1 - x0) as u32) };
         let pos = self.lib.position(item.id).unwrap_or(0);
         for j in [pos + 1, pos.wrapping_sub(1)] {
             if j < self.lib.len() {
@@ -423,6 +540,7 @@ impl App {
             let part = item.crop().map_or(uv(), |a| Rect::from_min_max(pos2(a.left as f32, a.top as f32), pos2(a.right as f32, a.bottom as f32)));
             ui.painter().with_clip_rect(rect).image(t, full, part, Color32::WHITE);
         }
+        self.divider(ui, id, shown, true);
     }
 
     fn filmstrip(&mut self, ui: &mut Ui) {
@@ -450,6 +568,7 @@ impl App {
                 if resp.clicked() {
                     self.zoom = None;
                 }
+                self.photo_menu(&resp, id);
                 self.thumb_cell(ui, id, r, 3, resp.hovered(), false);
             }
         });

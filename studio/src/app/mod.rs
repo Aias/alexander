@@ -27,6 +27,17 @@ use std::task::{Poll, Wake, Waker};
 use tiers::Tiers;
 use workers::{Done, Job, Workers};
 
+/// How the views compare a photo's render with the photo itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compare {
+    /// The render alone.
+    After,
+    /// The photo itself alone.
+    Before,
+    /// The photo itself on one side of a divider and the render on the other.
+    Split,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Grid,
@@ -99,7 +110,13 @@ pub struct App {
     mode: Mode,
     panel: bool,
     thumb_pt: f32,
-    before: bool,
+    compare: Compare,
+    /// Split: the divider's place across the picture, from 0 to 1, and whether the photo
+    /// itself is on the right.
+    split: f32,
+    split_swap: bool,
+    /// A photo whose finished picture is being read back for the clipboard.
+    copy_image: Option<(Id, Planner)>,
     clipboard: Option<Settings>,
     /// An edit to the looks is under way (a slider held): one undo step for all of it.
     edit_open: bool,
@@ -143,7 +160,10 @@ impl App {
             mode: Mode::Grid,
             panel: true,
             thumb_pt: 168.0,
-            before: false,
+            compare: Compare::After,
+            split: 0.5,
+            split_swap: false,
+            copy_image: None,
             clipboard: None,
             edit_open: false,
             zoom: None,
@@ -233,7 +253,7 @@ impl App {
             Dialog::LoadLook => {
                 for p in paths {
                     match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<Settings>(&t).map_err(|e| e.to_string())) {
-                        Ok(l) => self.set_looks(Some(l)),
+                        Ok(l) => self.set_looks(l),
                         Err(e) => self.export_errors.push(format!("{}: {e}", p.display())),
                     }
                 }
@@ -303,7 +323,8 @@ impl App {
                             self.lib.set_look(&[other], o.look);
                         }
                         let was_focus = self.lib.focus == Some(id);
-                        self.forget(&[id].into());
+                        self.tiers.forget(id);
+                        self.lib.take_out(&[id].into());
                         if was_focus {
                             self.lib.click(other);
                         }
@@ -325,11 +346,27 @@ impl App {
         }
     }
 
+    /// Take photos out of the library, which undo can put back, and let go of them on the GPU.
     fn forget(&mut self, ids: &std::collections::BTreeSet<Id>) {
         for &id in ids {
             self.tiers.forget(id);
         }
         self.lib.remove(ids);
+    }
+
+    /// Undo or redo. Photos that come back are opened again; photos that go are let go of.
+    fn step_history(&mut self, redo: bool) {
+        let ids = if redo { self.lib.redo() } else { self.lib.undo() };
+        for id in ids {
+            match self.lib.get(id) {
+                None => self.tiers.forget(id),
+                Some(it) if it.status == Status::Loading => {
+                    self.opening += 1;
+                    self.workers.send(Job::Open { id, path: it.path.clone() });
+                }
+                Some(_) => {}
+            }
+        }
     }
 
     // ---------- looks --------------------------------------------------------------------
@@ -338,10 +375,10 @@ impl App {
         self.lib.focus.and_then(|f| self.lib.get(f)).and_then(|it| it.look.as_ref())
     }
 
-    fn set_looks(&mut self, look: Option<Settings>) {
+    fn set_looks(&mut self, look: Settings) {
         let ids = self.lib.selection();
         self.lib.checkpoint(&ids);
-        self.lib.set_look(&ids, look);
+        self.lib.set_look(&ids, Some(look));
     }
 
     fn copy_look(&mut self, ctx: &egui::Context) {
@@ -355,7 +392,7 @@ impl App {
     fn paste_look(&mut self, text: Option<&str>) {
         let look = text.and_then(|t| serde_json::from_str::<Settings>(t.trim()).ok()).filter(|_| text.is_some_and(|t| t.trim_start().starts_with('{'))).or_else(|| self.clipboard.clone());
         if let Some(l) = look {
-            self.set_looks(Some(l));
+            self.set_looks(l);
         }
     }
 
@@ -385,7 +422,11 @@ impl App {
             }
             Action::CopyLook => self.copy_look(ctx),
             Action::PasteLook => self.paste_look(None),
-            Action::Reset => self.set_looks(None),
+            Action::Reset => {
+                let ids = self.lib.selection();
+                self.lib.checkpoint(&ids);
+                self.lib.reset_looks(&ids);
+            }
             Action::SaveLook => self.save_look(),
             Action::LoadLook => self.load_look(),
             Action::CopyFlags => {
@@ -430,16 +471,16 @@ impl App {
             self.open_export();
         }
         if k(cmd_shift, Key::R) {
-            self.set_looks(None);
+            self.do_action(ctx, controls::Action::Reset);
         }
         if k(cmd_shift, Key::V) && self.clipboard.is_some() {
             self.paste_look(None);
         }
         if k(cmd_shift, Key::Z) {
-            self.lib.redo();
+            self.step_history(true);
         }
         if k(cmd, Key::Z) {
-            self.lib.undo();
+            self.step_history(false);
         }
         #[cfg(target_os = "macos")]
         if k(cmd_shift, Key::O) {
@@ -488,7 +529,10 @@ impl App {
             self.panel = !self.panel;
         }
         if k(none, Key::Backslash) {
-            self.before = !self.before;
+            self.toggle_compare(Compare::Before);
+        }
+        if k(none, Key::Y) {
+            self.toggle_compare(Compare::Split);
         }
         if k(none, Key::V) && !self.lib.selected().is_empty() {
             self.do_action(ctx, controls::Action::Process(None));
@@ -613,14 +657,7 @@ impl App {
                 };
                 self.workers.send(job);
             }
-            Err(loads) => {
-                for (id, long) in loads {
-                    if let Some(it) = self.lib.get(id) {
-                        self.tiers.loading.insert((id, long));
-                        self.workers.send(Job::Full { id, path: it.path.clone(), long });
-                    }
-                }
-            }
+            Err(loads) => self.load_fulls(loads),
         }
     }
 
@@ -635,6 +672,48 @@ impl App {
     }
 
     /// Nothing loading, rendering or exporting.
+    fn load_fulls(&mut self, loads: Vec<(Id, u32)>) {
+        for (id, long) in loads {
+            if let Some(it) = self.lib.get(id) {
+                self.tiers.loading.insert((id, long));
+                self.workers.send(Job::Full { id, path: it.path.clone(), long });
+            }
+        }
+    }
+
+    /// Put the finished picture of a photo on the clipboard at the size of its simulation
+    /// grid, cut to the picture inside its border when the look strips it, once the photo's
+    /// full grid has loaded.
+    fn copy_image_step(&mut self, ctx: &egui::Context) {
+        let Some((id, planner)) = &mut self.copy_image else { return };
+        let Some(item) = self.lib.get(*id) else {
+            self.copy_image = None;
+            return;
+        };
+        match self.tiers.export_pixels(item, planner) {
+            Ok(Some((w, h, rgba))) => {
+                let mut pic = export::Picture { w, h, rgba };
+                if let Some(a) = item.crop() {
+                    pic = pic.crop(&a);
+                }
+                let bytes: Vec<u8> = pic.rgba.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8).collect();
+                ctx.copy_image(egui::ColorImage::from_rgba_unmultiplied([pic.w as usize, pic.h as usize], &bytes));
+                self.copy_image = None;
+            }
+            Ok(None) => self.copy_image = None,
+            Err(loads) => self.load_fulls(loads),
+        }
+    }
+
+    fn before(&self) -> bool {
+        self.compare == Compare::Before
+    }
+
+    /// Switch a compare on, or off again when it is already on.
+    fn toggle_compare(&mut self, c: Compare) {
+        self.compare = if self.compare == c { Compare::After } else { c };
+    }
+
     fn idle(&self) -> bool {
         self.opening == 0 && self.workers.queued() == 0 && self.tiers.loading.is_empty() && !self.pending && self.export_run.is_none()
     }
@@ -659,23 +738,19 @@ impl eframe::App for App {
         }
         self.poll_dialog();
         self.export_step();
-        let (loads, pending) = self.tiers.process(&self.lib, self.before);
+        self.copy_image_step(ctx);
+        let (loads, pending) = self.tiers.process(&self.lib, self.before());
         self.pending = pending;
         // while a knob is held the grid size may be passing through many values
         if !self.edit_open {
-            for (id, long) in loads {
-                if let Some(it) = self.lib.get(id) {
-                    self.tiers.loading.insert((id, long));
-                    self.workers.send(Job::Full { id, path: it.path.clone(), long });
-                }
-            }
+            self.load_fulls(loads);
         } else {
             self.pending = true;
         }
         if !ctx.input(|i| i.pointer.any_down()) {
             self.edit_open = false;
         }
-        if self.pending || self.export_run.is_some() || self.shots.is_some() {
+        if self.pending || self.export_run.is_some() || self.copy_image.is_some() || self.shots.is_some() {
             ctx.request_repaint();
         }
         if self.tiers.trace {

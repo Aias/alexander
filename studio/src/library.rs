@@ -95,6 +95,16 @@ impl Item {
 /// The looks of some photos before a change, for undo.
 pub type Snapshot = Vec<(Id, Option<Settings>, Option<Settings>)>;
 
+/// A change undo and redo take back.
+enum Step {
+    /// The looks of some photos before a change.
+    Looks(Snapshot),
+    /// Photos taken out of the library, each with its place in it.
+    Removed(Vec<(usize, Item)>),
+    /// Photos put back into the library.
+    Restored(Vec<Id>),
+}
+
 #[derive(Default)]
 pub struct Library {
     items: Vec<Item>,
@@ -107,8 +117,8 @@ pub struct Library {
     selected: BTreeSet<Id>,
     pub focus: Option<Id>,
     anchor: Option<Id>,
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
+    undo: Vec<Step>,
+    redo: Vec<Step>,
 }
 
 impl Library {
@@ -180,24 +190,36 @@ impl Library {
         Some(id)
     }
 
-    /// Take photos out of the library (never off the disk). Focus moves to the photo after
-    /// the first one removed.
+    /// Take photos out of the library (never off the disk) so that undo can put them back.
     pub fn remove(&mut self, ids: &BTreeSet<Id>) {
+        let taken = self.take_out(ids);
+        if !taken.is_empty() {
+            self.push_undo(Step::Removed(taken));
+        }
+    }
+
+    /// Take photos out of the library, giving each with the place it had. Their pixels are
+    /// let go of, so a photo put back is opened again. Focus moves to the photo after the
+    /// first one taken out.
+    pub fn take_out(&mut self, ids: &BTreeSet<Id>) -> Vec<(usize, Item)> {
         if ids.is_empty() {
-            return;
+            return Vec::new();
         }
         let first = ids.iter().filter_map(|id| self.position(*id)).min();
         self.rev += 1;
-        self.items.retain(|it| !ids.contains(&it.id));
+        let mut taken = Vec::new();
+        for (i, mut it) in std::mem::take(&mut self.items).into_iter().enumerate() {
+            if ids.contains(&it.id) {
+                it.proxy = None;
+                it.status = Status::Loading;
+                taken.push((i, it));
+            } else {
+                self.items.push(it);
+            }
+        }
         self.by_path.retain(|_, id| !ids.contains(id));
         self.reindex();
         self.selected.retain(|id| !ids.contains(id));
-        for stack in [&mut self.undo, &mut self.redo] {
-            for snap in stack.iter_mut() {
-                snap.retain(|(id, _, _)| !ids.contains(id));
-            }
-            stack.retain(|s| !s.is_empty());
-        }
         if self.focus.is_some_and(|f| ids.contains(&f)) {
             self.focus = None;
             if self.selected.is_empty() {
@@ -215,6 +237,21 @@ impl Library {
         if self.anchor.is_some_and(|a| ids.contains(&a)) {
             self.anchor = self.focus;
         }
+        taken
+    }
+
+    /// Put photos taken out back at their places, selected.
+    fn put_back(&mut self, items: Vec<(usize, Item)>) {
+        self.rev += 1;
+        self.selected.clear();
+        for (i, it) in items {
+            self.by_path.insert(it.path.clone(), it.id);
+            self.selected.insert(it.id);
+            self.items.insert(i.min(self.items.len()), it);
+        }
+        self.reindex();
+        self.focus = self.selected.iter().next().copied();
+        self.anchor = self.focus;
     }
 
     fn reindex(&mut self) {
@@ -333,11 +370,15 @@ impl Library {
     pub fn checkpoint(&mut self, ids: &[Id]) {
         let snap = self.snapshot(ids);
         if !snap.is_empty() {
-            self.undo.push(snap);
-            self.redo.clear();
-            if self.undo.len() > 200 {
-                self.undo.remove(0);
-            }
+            self.push_undo(Step::Looks(snap));
+        }
+    }
+
+    fn push_undo(&mut self, step: Step) {
+        self.undo.push(step);
+        self.redo.clear();
+        if self.undo.len() > 200 {
+            self.undo.remove(0);
         }
     }
 
@@ -355,19 +396,33 @@ impl Library {
         inverse
     }
 
-    /// Returns the photos whose looks changed.
+    /// Take a step back: returns the step that makes it again and the photos it touched.
+    fn apply(&mut self, step: Step) -> (Step, Vec<Id>) {
+        match step {
+            Step::Looks(s) => {
+                let ids = s.iter().map(|x| x.0).collect();
+                (Step::Looks(self.restore(s)), ids)
+            }
+            Step::Removed(items) => {
+                let ids: Vec<Id> = items.iter().map(|(_, it)| it.id).collect();
+                self.put_back(items);
+                (Step::Restored(ids.clone()), ids)
+            }
+            Step::Restored(ids) => (Step::Removed(self.take_out(&ids.iter().copied().collect())), ids),
+        }
+    }
+
+    /// Returns the photos whose looks changed or that came back or went.
     pub fn undo(&mut self) -> Vec<Id> {
         let Some(s) = self.undo.pop() else { return Vec::new() };
-        let ids = s.iter().map(|x| x.0).collect();
-        let inv = self.restore(s);
+        let (inv, ids) = self.apply(s);
         self.redo.push(inv);
         ids
     }
 
     pub fn redo(&mut self) -> Vec<Id> {
         let Some(s) = self.redo.pop() else { return Vec::new() };
-        let ids = s.iter().map(|x| x.0).collect();
-        let inv = self.restore(s);
+        let (inv, ids) = self.apply(s);
         self.undo.push(inv);
         ids
     }
@@ -383,6 +438,21 @@ impl Library {
                 if look.is_none() {
                     it.stash = None;
                 }
+            }
+        }
+    }
+
+    /// Put the film settings of photos back to the defaults and leave the process on or off.
+    /// A photo shown as it is starts from the defaults when the process is switched on again.
+    pub fn reset_looks(&mut self, ids: &[Id]) {
+        self.rev += 1;
+        for &id in ids {
+            if let Some(it) = self.get_mut(id) {
+                if it.look.as_ref().is_some_and(|l| *l != Settings::default()) {
+                    it.look = Some(Settings::default());
+                    it.gen += 1;
+                }
+                it.stash = None;
             }
         }
     }
