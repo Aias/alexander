@@ -1,0 +1,67 @@
+{
+ "film_mm": 3.6,
+ "cases": {
+  "default": {
+   "flags": [],
+   "log": "auto exposure -0.63 EV (median 0.63, brightest 2% at 0.96)"
+  },
+  "straight": {
+   "flags": [
+    "--house",
+    "0",
+    "--lens-exponent",
+    "2",
+    "--lens-um",
+    "8"
+   ],
+   "log": "auto exposure -0.63 EV (median 0.63, brightest 2% at 0.96)"
+  },
+  "doublex": {
+   "flags": [
+    "--film",
+    "doublex",
+    "--halation",
+    "0.06"
+   ],
+   "log": "auto exposure -0.62 EV (median 0.63, brightest 2% at 0.96)"
+  },
+  "nelson_red": {
+   "flags": [
+    "--edge-density",
+    "1",
+    "--filter",
+    "red",
+    "--dev",
+    "norm-1956",
+    "--grade",
+    "2.55"
+   ],
+   "log": "auto exposure -0.68 EV (median 0.64, brightest 2% at 0.96)"
+  },
+  "copy": {
+   "flags": [
+    "--repro",
+    "copy"
+   ],
+   "log": "auto exposure -0.63 EV (median 0.63, brightest 2% at 0.96)"
+  },
+  "book": {
+   "flags": [
+    "--repro",
+    "book",
+    "--page-mm",
+    "65.024"
+   ],
+   "log": "auto exposure -0.63 EV (median 0.63, brightest 2% at 0.96)"
+  },
+  "book_page": {
+   "flags": [
+    "--repro",
+    "book",
+    "--view",
+    "page"
+   ],
+   "log": "auto exposure -0.62 EV (median 0.63, brightest 2% at 0.96)"
+  }
+ }
+}
