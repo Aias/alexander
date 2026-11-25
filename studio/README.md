@@ -49,8 +49,12 @@ Survey and Loupe, with the photo itself left of a divider and the render right o
 the divider to move it, and press Swap to put the photo itself on the right. Moving the
 divider draws the picture again without rendering it again.
 
-Right-clicking a photo copies its file path, or its finished picture as an image at the
-size of its simulation grid, cut to the picture inside its border when the look strips it.
+Right-clicking a photo opens a menu of what can be done to it: open it in the loupe, show
+it in the Finder, copy its file path, copy its finished picture as an image, switch the
+process on or off, copy, paste or reset its look, export it, or remove it from the
+library. As in the Finder, a photo outside the selection becomes the selection first, so
+the commands act on every photo selected. Copy Image copies the photo clicked at the size
+of its simulation grid, cut to the picture inside its border when the look strips it.
 
 | Keys | Does |
 | --- | --- |
@@ -61,7 +65,7 @@ size of its simulation grid, cut to the picture inside its border when the look 
 | Esc | Back to the grid |
 | Arrow keys | Next or previous photo; ⇧ extends the selection in the library |
 | ⌘A / ⌘D | Select all / none |
-| Delete or Backspace | Remove from the library (the file stays on disk) |
+| Delete or Backspace | Remove from the library (the file stays on disk; ⌘Z puts it back) |
 | V | Switch the process on or off for the selection |
 | \\ | Before |
 | Y | Split before and after |
@@ -180,5 +184,4 @@ and quit.
   JSON, not in a catalogue.
 - Exporting reads each finished picture back from the GPU on the interface thread, so the
   window pauses for a moment per photo while an export runs.
-- Removing photos from the library cannot be undone; their looks go with them.
 - Speed has been measured only on a software GPU, where absolute numbers mean little.

@@ -164,6 +164,22 @@ fn reset_restores_the_defaults_and_keeps_the_process() {
 }
 
 #[test]
+fn removal_is_undone_in_place() {
+    let (mut l, id) = lib(4);
+    l.set_look(&[id[1]], Some(Settings { grade: 1.5, ..Settings::default() }));
+    l.remove(&BTreeSet::from([id[1], id[2]]));
+    assert_eq!(l.len(), 2);
+    assert!(l.find_path(&PathBuf::from("/p/1.jpg")).is_none());
+    l.undo();
+    assert_eq!(l.items().iter().map(|it| it.id).collect::<Vec<_>>(), id);
+    assert_eq!(sel(&l), vec![id[1], id[2]]);
+    assert_eq!(l.get(id[1]).unwrap().look.as_ref().map(|s| s.grade), Some(1.5));
+    assert!(l.find_path(&PathBuf::from("/p/2.jpg")).is_some());
+    l.redo();
+    assert_eq!(l.len(), 2);
+}
+
+#[test]
 fn an_export_opens_as_its_original_with_its_look() {
     let dir = std::env::temp_dir().join(format!("studio-roundtrip-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

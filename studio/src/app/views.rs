@@ -166,18 +166,68 @@ impl App {
         }
     }
 
-    /// The menu a right click on a photo opens.
+    /// The menu a right click on a photo opens. As in Finder, a photo outside the selection
+    /// becomes the selection first, so the commands act on what is selected; the photo
+    /// clicked becomes the focused one, whose look and picture are copied.
     fn photo_menu(&mut self, r: &egui::Response, id: Id) {
-        r.context_menu(|ui| {
-            let Some(item) = self.lib.get(id) else { return };
-            if ui.button("Copy File Path").clicked() {
-                ui.ctx().copy_text(item.path.display().to_string());
-                ui.close_menu();
+        if r.secondary_clicked() {
+            if self.lib.selected().contains(&id) {
+                self.lib.focus = Some(id);
+            } else {
+                self.lib.click(id);
             }
-            let copyable = item.ready() && item.look.is_some() && self.copy_image.is_none();
-            if ui.add_enabled(copyable, Button::new("Copy Image")).clicked() {
+        }
+        r.context_menu(|ui| {
+            ui.set_min_width(230.0);
+            let item = |ui: &mut Ui, text: &str, keys: &str, enabled: bool| {
+                let clicked = ui.add_enabled(enabled, Button::new(text).shortcut_text(keys)).clicked();
+                if clicked {
+                    ui.close_menu();
+                }
+                clicked
+            };
+            let ctx = ui.ctx().clone();
+            let ids = self.lib.selected().clone();
+            let paths: Vec<_> = ids.iter().filter_map(|&i| self.lib.get(i)).map(|it| it.path.clone()).collect();
+            let looked = self.lib.get(id).is_some_and(|it| it.look.is_some());
+            let off = ids.iter().any(|&i| self.lib.get(i).is_some_and(|it| it.look.is_none()));
+            if item(ui, "Open in Loupe", "↩", self.mode != Mode::Loupe) {
+                self.mode = Mode::Loupe;
+                self.zoom = None;
+            }
+            #[cfg(target_os = "macos")]
+            if item(ui, "Show in Finder", "", true) {
+                let paths = paths.clone();
+                std::thread::spawn(move || std::process::Command::new("/usr/bin/open").arg("-R").args(paths).status());
+            }
+            if item(ui, if paths.len() > 1 { "Copy File Paths" } else { "Copy File Path" }, "", true) {
+                ctx.copy_text(paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"));
+            }
+            let ready = self.lib.get(id).is_some_and(|it| it.ready());
+            if item(ui, "Copy Image", "", ready && looked && self.copy_image.is_none()) {
                 self.copy_image = Some((id, Planner::new()));
-                ui.close_menu();
+            }
+            ui.separator();
+            if item(ui, if off { "Turn Film On" } else { "Turn Film Off" }, "V", true) {
+                self.do_action(&ctx, controls::Action::Process(None));
+            }
+            if item(ui, "Copy Look", "⇧⌘C", looked) {
+                self.do_action(&ctx, controls::Action::CopyLook);
+            }
+            if item(ui, "Paste Look", "⇧⌘V", self.clipboard.is_some()) {
+                self.do_action(&ctx, controls::Action::PasteLook);
+            }
+            if item(ui, "Reset Look", "⇧⌘R", looked) {
+                self.do_action(&ctx, controls::Action::Reset);
+            }
+            ui.separator();
+            if item(ui, "Export…", "⇧⌘E", self.exportable() > 0 && self.export_run.is_none()) {
+                self.open_export();
+            }
+            ui.separator();
+            let remove = if ids.len() > 1 { format!("Remove {} Photos from Library", ids.len()) } else { "Remove from Library".to_string() };
+            if item(ui, &remove, "⌫", true) {
+                self.forget(&ids);
             }
         });
     }

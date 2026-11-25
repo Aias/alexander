@@ -323,7 +323,8 @@ impl App {
                             self.lib.set_look(&[other], o.look);
                         }
                         let was_focus = self.lib.focus == Some(id);
-                        self.forget(&[id].into());
+                        self.tiers.forget(id);
+                        self.lib.take_out(&[id].into());
                         if was_focus {
                             self.lib.click(other);
                         }
@@ -345,11 +346,27 @@ impl App {
         }
     }
 
+    /// Take photos out of the library, which undo can put back, and let go of them on the GPU.
     fn forget(&mut self, ids: &std::collections::BTreeSet<Id>) {
         for &id in ids {
             self.tiers.forget(id);
         }
         self.lib.remove(ids);
+    }
+
+    /// Undo or redo. Photos that come back are opened again; photos that go are let go of.
+    fn step_history(&mut self, redo: bool) {
+        let ids = if redo { self.lib.redo() } else { self.lib.undo() };
+        for id in ids {
+            match self.lib.get(id) {
+                None => self.tiers.forget(id),
+                Some(it) if it.status == Status::Loading => {
+                    self.opening += 1;
+                    self.workers.send(Job::Open { id, path: it.path.clone() });
+                }
+                Some(_) => {}
+            }
+        }
     }
 
     // ---------- looks --------------------------------------------------------------------
@@ -460,10 +477,10 @@ impl App {
             self.paste_look(None);
         }
         if k(cmd_shift, Key::Z) {
-            self.lib.redo();
+            self.step_history(true);
         }
         if k(cmd, Key::Z) {
-            self.lib.undo();
+            self.step_history(false);
         }
         #[cfg(target_os = "macos")]
         if k(cmd_shift, Key::O) {
