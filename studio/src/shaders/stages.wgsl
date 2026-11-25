@@ -381,7 +381,7 @@ fn fs_mip(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 // v1 = (view: 0 print, 1 scan, 2 page; encoded solid ink; scan black; scan white)
 // v2 = (paper colour r, g, b; dither strength)
 // v3 = (first canvas column showing the photo itself, 1 to write display values
-//       unconverted, the column after the last showing it)
+//       unconverted, the column after the last showing it, 1 to mark clipped values)
 // t0 the finished picture with its pyramid, t1 the photo
 
 fn texel(p: vec2<i32>, lvl: i32, src: bool) -> vec3<f32> {
@@ -445,6 +445,13 @@ fn fs_canvas(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         enc = vec3<f32>(clamp(u.v[1].z + (lin_to_srgb(r.r) - ek) / (u.v[1].w - ek) * (1.0 - u.v[1].z), 0.0, 1.0));
     } else {
         enc = vec3<f32>(lin_to_srgb(clamp(r.r, 0.0, 1.0)));
+    }
+    if (u.v[3].w > 0.5) {
+        if (min(enc.r, min(enc.g, enc.b)) >= 0.998) {
+            enc = vec3<f32>(1.0, 0.25, 0.2);
+        } else if (max(enc.r, max(enc.g, enc.b)) <= 0.002) {
+            enc = vec3<f32>(0.2, 0.45, 1.0);
+        }
     }
     if (u.v[3].y > 0.5) {
         return vec4<f32>(enc, 1.0);

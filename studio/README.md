@@ -33,7 +33,9 @@ selected photo at once. Original shows the photo as it is; Film applies the proc
 Moving a knob changes that knob on all selected photos and leaves their other knobs as
 they are, so photos can share some settings and differ in others. The histogram at the
 top of the panel counts the tones of the focused photo as it is shown, from its 640 px
-copy.
+copy. The triangle in each of its top corners lights when shadows or highlights clip to
+pure black or white; clicking either, or J, marks those values in the survey and the
+loupe, highlights red and shadows blue.
 
 A look is a set of numbers and nothing else. Every render, on screen or exported, starts
 again from the original file, so changing a look never processes a processed picture.
@@ -75,6 +77,7 @@ of its simulation grid, cut to the picture inside its border when the look strip
 | S | Star the selection, or take its stars away |
 | \\ | Before |
 | Y | Split before and after |
+| J | Mark clipped highlights red and clipped shadows blue |
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |
 | ⇧⌘R | Reset the film settings of the selection to the defaults |
 | ⌘Z / ⇧⌘Z | Undo and redo changes to looks |

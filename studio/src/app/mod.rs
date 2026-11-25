@@ -115,6 +115,8 @@ pub struct App {
     /// itself is on the right.
     split: f32,
     split_swap: bool,
+    /// Pure white and pure black are marked in the survey and the loupe.
+    clipping: bool,
     /// A photo whose finished picture is being read back for the clipboard.
     copy_image: Option<(Id, Planner)>,
     clipboard: Option<Settings>,
@@ -163,6 +165,7 @@ impl App {
             compare: Compare::After,
             split: 0.5,
             split_swap: false,
+            clipping: false,
             copy_image: None,
             clipboard: None,
             edit_open: false,
@@ -536,6 +539,9 @@ impl App {
         }
         if k(none, Key::Y) {
             self.toggle_compare(Compare::Split);
+        }
+        if k(none, Key::J) {
+            self.clipping = !self.clipping;
         }
         if k(none, Key::S) {
             let ids = self.lib.selection();

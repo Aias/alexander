@@ -458,7 +458,7 @@ impl App {
             let (iw, ih) = (((gw as f32 * z).round() as u32).max(1), ((gh as f32 * z).round() as u32).max(1));
             let img = centred(inner, iw, ih, ppp);
             let focused = self.lib.focus == Some(id);
-            let canvas = Canvas { origin, scale: gw as f32 / iw as f32, source: self.split_source(iw) };
+            let canvas = Canvas { origin, scale: gw as f32 / iw as f32, source: self.split_source(iw), clip: self.clipping };
             let tex = self.tiers.canvas(item, canvas, [iw, ih], if focused { 0 } else { 1 }).or_else(|| self.tiers.thumb_tex(id));
             if let Some(t) = tex {
                 ui.painter().image(t, img, uv(), Color32::WHITE);
@@ -545,7 +545,7 @@ impl App {
             return;
         }
         let shown = from_px([x0, y0, x1, y1], ppp);
-        let canvas = Canvas { origin: [origin[0] + c[0] + (x0 as f32 - vc[0]) / z, origin[1] + c[1] + (y0 as f32 - vc[1]) / z], scale: 1.0 / z, source: self.split_source((x1 - x0) as u32) };
+        let canvas = Canvas { origin: [origin[0] + c[0] + (x0 as f32 - vc[0]) / z, origin[1] + c[1] + (y0 as f32 - vc[1]) / z], scale: 1.0 / z, source: self.split_source((x1 - x0) as u32), clip: self.clipping };
         if let Some(pos) = self.lib.shown_position(id) {
             for j in [pos + 1, pos.wrapping_sub(1)] {
                 if let Some(next) = self.lib.shown().get(j).and_then(|&n| self.lib.get(n)) {

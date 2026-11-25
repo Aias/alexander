@@ -32,7 +32,7 @@ impl App {
     pub(super) fn panel_ui(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
         let focus = self.lib.focus.filter(|_| !self.lib.selected().is_empty()).and_then(|f| self.lib.get(f));
         let before = self.before();
-        histogram(ui, focus.and_then(|it| self.tiers.histogram(it, before)));
+        histogram(ui, focus.and_then(|it| self.tiers.histogram(it, before)), &mut self.clipping);
         let processed = focus.is_some_and(|it| it.look.is_some());
         let mut s = focus.and_then(|it| it.look.clone().or_else(|| it.stash.clone())).unwrap_or_default();
         let enabled = focus.is_some();
@@ -59,8 +59,9 @@ impl App {
 }
 
 /// Counts of the display values from black to white, scaled so that the busiest tone short
-/// of the clipped ends fills the box.
-fn histogram(ui: &mut Ui, bins: Option<&[f32]>) {
+/// of the clipped ends fills the box. A triangle in each top corner lights when shadows or
+/// highlights clip, and a click on either switches the marking of clipped values.
+fn histogram(ui: &mut Ui, bins: Option<&[f32]>, clipping: &mut bool) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 88.0), Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, CornerRadius::same(4), VIEW_BG);
@@ -75,6 +76,20 @@ fn histogram(ui: &mut Ui, bins: Option<&[f32]>) {
         let h = (c / top).min(1.0) * inner.height();
         let x = rect.left() + i as f32 * w;
         p.rect_filled(Rect::from_min_max(pos2(x, inner.bottom() - h), pos2(x + w, inner.bottom())), CornerRadius::ZERO, HISTOGRAM);
+    }
+    let total: f32 = bins.iter().sum();
+    for (corner, count, toward) in [(rect.left_top() + vec2(10.0, 10.0), bins[0], -1.0), (rect.right_top() + vec2(-10.0, 10.0), bins[bins.len() - 1], 1.0)] {
+        let r = ui.interact(Rect::from_center_size(corner, vec2(16.0, 16.0)), ui.id().with(("clip", corner.x as i32)), Sense::click()).on_hover_text("J");
+        if r.clicked() {
+            *clipping = !*clipping;
+        }
+        let lit = count > total * 0.001;
+        let fill = if lit { Color32::WHITE } else { Color32::from_gray(80) };
+        let pts = [corner + vec2(-4.0 * toward, -4.0), corner + vec2(4.0 * toward, -4.0), corner + vec2(4.0 * toward, 4.0)];
+        ui.painter().add(Shape::convex_polygon(pts.to_vec(), fill, Stroke::NONE));
+        if *clipping {
+            ui.painter().rect_stroke(Rect::from_center_size(corner, vec2(14.0, 14.0)), CornerRadius::same(2), Stroke::new(1.0f32, Color32::from_gray(200)), egui::StrokeKind::Inside);
+        }
     }
 }
 

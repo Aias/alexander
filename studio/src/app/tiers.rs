@@ -68,7 +68,7 @@ struct DrawKey {
     /// screen while the new one is made.
     complete: bool,
     gen: u64,
-    canvas: [u32; 5],
+    canvas: [u32; 6],
     size: [u32; 2],
 }
 
@@ -589,7 +589,7 @@ pub type Display = (u32, u32, Vec<f32>);
 fn scaled(canvas: Canvas, pw: u32, grid: (u32, u32), photo: bool) -> Canvas {
     let k = pw as f32 / grid.0 as f32;
     let source = if photo { Canvas::PHOTO } else { canvas.source };
-    Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, source }
+    Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, source, ..canvas }
 }
 
 /// The part of a `size` picture of `item` that is shown: top-left corner and size.
@@ -606,9 +606,9 @@ fn within(item: &Item, size: (u32, u32)) -> ([f32; 2], (u32, u32)) {
 /// A thumbnail of `size` drawn from the proxy, of `proxy` pixels.
 fn thumb_canvas(item: &Item, proxy: (u32, u32), size: [u32; 2], source: bool) -> Canvas {
     let (origin, (w, _)) = within(item, proxy);
-    Canvas { origin, scale: w as f32 / size[0] as f32, source: if source { Canvas::PHOTO } else { Canvas::RENDER } }
+    Canvas { origin, scale: w as f32 / size[0] as f32, source: if source { Canvas::PHOTO } else { Canvas::RENDER }, clip: false }
 }
 
-fn canvas_bits(c: &Canvas) -> [u32; 5] {
-    [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits(), c.source[0].to_bits(), c.source[1].to_bits()]
+fn canvas_bits(c: &Canvas) -> [u32; 6] {
+    [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits(), c.source[0].to_bits(), c.source[1].to_bits(), c.clip as u32]
 }
