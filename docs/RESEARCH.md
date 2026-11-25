@@ -20,45 +20,49 @@ The approach is to simulate the physical chain a picture went through, in physic
 so that every setting means something and can be checked against published data. What
 published data cannot settle is set by comparison with the book's own pages.
 
-## 2. How the research was run
+## 2. How the work was done
 
-The work alternated between research rounds and building.
+Research, building and testing were one continuous process, gone through many times:
+look something up, build it, check it against published data, look at the result, and
+let whatever looked wrong decide what to look up next. No stage of the tool was designed
+up front, and several were rebuilt when later findings contradicted them (section 7).
 
-**Research rounds.** Each round started from a seed, a question or a source, and
-followed it through small steps: one search or one close reading at a time, with a note
-for each. Ten rounds were run. The rules were:
+**Sources.** A few rules were kept throughout:
 
 - Only sources that were opened are cited. Each claim is marked as read at first hand
   (and how much of the source was read), confirmed in code or data, or inference.
 - Primary sources are preferred: makers' datasheets and data books, standards, journal
   papers, patents, source code, trade manuals, library and museum records.
-- Easy sources agree with each other. Each round also had to reach beyond first-page
-  results through citation chains, other languages (Japanese, German, Swedish, French)
-  and adjacent fields (astronomy, radiography, motion pictures, photogrammetry).
+- Easy sources agree with each other, so the search also went beyond first-page results:
+  through citation chains, other languages (Japanese, German, Swedish, French) and
+  adjacent fields (astronomy, radiography, motion pictures, photogrammetry).
 - New questions were put to data and code already in hand. Several of the most useful
   numbers came this way.
-- Mistakes are recorded with their corrections (section 7).
+- Mistakes are recorded with their corrections.
 
-| Round | Seed | What it changed |
-| --- | --- | --- |
-| 1 | Organic-looking film grain | Grain moved from "a texture added to the output" to "random particles in the negative, shaped by everything after" |
-| 2 | The book's photographs | Little found at first; located where the answers were |
-| 3 | Shaping noise into grain | Real grain is white noise low-passed, with no preferred blob size |
-| 4 | Black-and-white film and paper data | Curves, sharpness, spectral response and a route from a catalogue granularity to a grain size, all with usable licences |
-| 5 | Halftone, press and paper | The press as a tone curve with three numbers and a small blur |
-| 6 | Development edge effects | The effect became a sized quantity with a known place in the chain |
-| 7 | Open leads and independent sources | The book's own account of its pictures; the shape of film blur |
-| 8 | The source publications | Two pictures matched to the pages they were copied from, both gravure |
-| 9 | Halation and lens flare, 1930 to 1965 | Period numbers for both; neither adopted |
-| 10 | Period films and development | A measured law for grain against development; what Tri-X was in 1956 |
-
-**Building.** Findings were built into the tool and checked by `tools/calibrate.py`,
+**Checking.** Findings were built into the tool and checked by `tools/calibrate.py`,
 which compares the simulation with datasheet figures.
 
 **Judging.** What data could not settle was judged by eye, in two ways: blind pairs of
 renders differing in one setting, and sheets that set renders beside the book's own
 pages at the same scale. Section 6 says what was learned about the difference between
 the two.
+
+The questions the work went through, and what each changed:
+
+| Question | What it changed |
+| --- | --- |
+| What makes film grain look organic | Grain moved from "a texture added to the output" to "random particles in the negative, shaped by everything after" |
+| How noise can be shaped into grain | Real grain is white noise low-passed, with no preferred blob size |
+| What data exists for black-and-white film and paper | Curves, sharpness, spectral response and a route from a catalogue granularity to a grain size, all with usable licences |
+| What halftone, press and paper do | The press as a tone curve with three numbers and a small blur |
+| How development sharpens edges | The effect became a sized quantity with a known place in the chain |
+| What the book says about its own pictures | They were gathered from older publications and re-photographed from printed pages |
+| What shape blur has in film | A sharp core with a long skirt, where a Gaussian has neither |
+| Where the pictures were copied from | Two matched to their source pages, both gravure; the copy brought each picture to a common range |
+| How much halation and lens flare the period's materials had | Period numbers for both; neither adopted |
+| What films and development the period used | A measured law for grain against development; what Tri-X was in 1956 |
+| What the book's pages measure | The tone range, softness and grain that the defaults are set against |
 
 ## 3. What the book's pictures are
 
@@ -295,9 +299,9 @@ percentiles, edge widths and texture at four scales.
 
 | Decision | Alternative | Basis | Trade-off |
 | --- | --- | --- | --- |
-| Simulate the chain in physical units | Tone curve plus overlaid grain texture | Round 1; overlaid textures read as regular and artificial | More code, slower; every number is checkable |
+| Simulate the chain in physical units | Tone curve plus overlaid grain texture | Overlaid textures read as regular and artificial | More code, slower; every number is checkable |
 | Fixed simulation grid, enlarged to output | Simulate at the file's pixel count | By eye | Detail finer than the grid is given up on purpose |
-| Poisson grain from a catalogue figure | Filtered or band-limited noise | Rounds 1, 3, 4 | No direct control of grain "size"; it follows from film width and grid |
+| Poisson grain from a catalogue figure | Filtered or band-limited noise | Fitted models of real film; the grain model of an open simulator | No direct control of grain "size"; it follows from film width and grid |
 | Finish at a darkroom print with house tones | Finish at the simulated press | By eye; measurement | Skips the halftone, which the scans cannot resolve anyway |
 | Long-tailed softness | Gaussian | Fit of 54 curves; comparison | Needs a Fourier-domain filter |
 | Softness of 10 micrometres | Sharper or softer | The book's edge widths | Softer than a blind eye picked in isolation |
@@ -330,13 +334,14 @@ set a default shows the references alongside the candidates.
   mechanical. The screen is not simulated now.
 - **Grain from shaped noise.** Noise with a cloud-like spectrum looked mottled; noise
   limited to one band of frequencies gave grain of a single blob size, which was
-  unpleasant to look at. Fitted models of real film (round 3) show power falling
-  steadily with frequency and no preferred size, which is what counting statistics give.
-- **"No open simulator has black-and-white film data."** Wrong; round 4 found several.
+  unpleasant to look at. Fitted models of real film show power falling steadily with
+  frequency and no preferred size, which is what counting statistics give.
+- **"No open simulator has black-and-white film data."** Wrong. Several do, and one of
+  them supplies this tool's data.
 - **"The scans preserve the page's ink black."** A units mistake between encoded and
   linear values. The scans have had their levels set.
-- **"The first printing was a halftone."** Assumed in rounds 5 and 7. The pages
-  identified in round 8 are gravure.
+- **"The first printing was a halftone."** Assumed until two pages were matched to their
+  sources. Both are gravure.
 - **"The book's look is a harder copy."** The first model of the book's chain raised
   contrast and lost both ends. Measurement showed the book's pages have more mid-tone
   and more open shadows than a straight print.
