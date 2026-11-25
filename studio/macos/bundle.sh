@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Alexander Studio and assemble "studio/target/Alexander Studio.app".
+# Build Alexander and assemble "studio/target/Alexander.app".
 #
 #   studio/macos/bundle.sh               release build for this Mac's architecture
 #   studio/macos/bundle.sh --universal   arm64 + x86_64 joined with lipo
@@ -51,7 +51,7 @@ target_dir="$studio_dir/target"
 # environment points elsewhere.
 export CARGO_TARGET_DIR="$target_dir"
 
-app_name="Alexander Studio"
+app_name="Alexander"
 bin_name="alexander-studio"
 app="$target_dir/$app_name.app"
 

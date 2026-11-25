@@ -1,4 +1,4 @@
-//! Alexander Studio: open photos, give them the look of the book's pictures live, export.
+//! Alexander: open photos, give them the look of the book's pictures live, export.
 //!
 //!     alexander-studio [photos or folders…]
 
@@ -24,8 +24,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         wgpu_options,
-        viewport: egui::ViewportBuilder::default().with_title("Alexander Studio").with_inner_size([1440.0, 900.0]).with_min_inner_size([720.0, 480.0]).with_drag_and_drop(true),
+        viewport: egui::ViewportBuilder::default().with_title("Alexander").with_inner_size([1440.0, 900.0]).with_min_inner_size([720.0, 480.0]).with_drag_and_drop(true),
         ..Default::default()
     };
-    eframe::run_native("Alexander Studio", options, Box::new(move |cc| Ok(Box::new(app::App::new(cc, paths)))))
+    eframe::run_native("Alexander", options, Box::new(move |cc| Ok(Box::new(app::App::new(cc, paths)))))
 }

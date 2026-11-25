@@ -109,11 +109,11 @@ jobs:
       # ditto keeps the code signature and extended attributes that a plain
       # zip of the bundle would break.
       - name: Zip the app
-        run: ditto -c -k --keepParent "target/Alexander Studio.app" "target/Alexander-Studio-macOS-arm64.zip"
+        run: ditto -c -k --keepParent "target/Alexander.app" "target/Alexander-macOS-arm64.zip"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: Alexander-Studio-macOS-arm64
-          path: studio/target/Alexander-Studio-macOS-arm64.zip
+          name: Alexander-macOS-arm64
+          path: studio/target/Alexander-macOS-arm64.zip
           if-no-files-found: error
           retention-days: 14

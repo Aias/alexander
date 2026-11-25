@@ -1,4 +1,4 @@
-# Alexander Studio
+# Alexander
 
 A desktop studio for the film and print simulation of `twb2.py`. Open any number of
 photos, choose some, and give them the look of the pictures in *The Timeless Way of
