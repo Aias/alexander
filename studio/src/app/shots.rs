@@ -84,18 +84,18 @@ impl Shots {
             }
             5 if settled => self.shot(ctx, "3-selected"),
             6 => {
-                app.mode = Mode::Single;
+                app.mode = Mode::Loupe;
                 app.panel = true;
                 app.zoom = None;
                 self.step += 1;
             }
-            7 if settled => self.shot(ctx, "4-single"),
+            7 if settled => self.shot(ctx, "4-loupe"),
             8 => {
                 app.zoom = Some(1.0);
                 app.center = [0.45, 0.5];
                 self.step += 1;
             }
-            9 if settled => self.shot(ctx, "5-single-100"),
+            9 if settled => self.shot(ctx, "5-loupe-100"),
             10 => {
                 // a late-stage knob: only the print and what follows should be redone
                 let id = app.lib.focus.unwrap();
@@ -110,12 +110,18 @@ impl Shots {
                 self.shot(ctx, "6-grade")
             }
             12 => {
+                app.open_export();
+                self.step += 1;
+            }
+            13 if settled && self.idle >= 12 => self.shot(ctx, "7-export"),
+            14 => {
+                app.export_form = None;
                 let dir = self.dir.join("export");
                 let _ = std::fs::create_dir_all(&dir);
                 app.start_export(ExportForm { dir, dir_ok: true, format: Format::Png8, size: SizeChoice::Original, long: 0 });
                 self.step += 1;
             }
-            13 if settled => {
+            15 if settled => {
                 eprintln!("export finished; errors: {:?}", app.export_errors);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 self.step += 1;

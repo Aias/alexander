@@ -26,20 +26,25 @@ them on the command line. The library shows every photo; click to select, ⌘-cl
 or remove one, ⇧-click to select a run. The panel on the right edits the look of every
 selected photo at once. Original shows the photo as it is; Film applies the process.
 Moving a knob changes that knob on all selected photos and leaves their other knobs as
-they are, so photos can share some settings and differ in others.
+they are, so photos can share some settings and differ in others. The histogram at the
+top of the panel counts the tones of the focused photo as it is shown, from its 640 px
+copy.
 
 A look is a set of numbers and nothing else. Every render, on screen or exported, starts
 again from the original file, so changing a look never processes a processed picture.
 
-Three views: all photos (G), the selected photos side by side (N), and one photo large
-with a filmstrip (E, Return, or double-click).
+Three views, named as in Lightroom: Grid, all photos (G); Survey, the selected photos side
+by side (N); and Loupe, one photo large (E, Return, or double-click). Survey and Loupe
+have a filmstrip. The bar under the view counts the photos and the selection, names the
+focused photo, switches Before on and off, and holds the thumbnail size in the grid and
+the zoom in the loupe.
 
 | Keys | Does |
 | --- | --- |
 | ⌘O | Open photos |
 | ⇧⌘E | Export the selected photos |
-| G / N / E or Return | All photos / selected photos / single photo |
-| Esc | Back to all photos |
+| G / N / E or Return | Grid / Survey / Loupe |
+| Esc | Back to the grid |
 | Arrow keys | Next or previous photo; ⇧ extends the selection in the library |
 | ⌘A / ⌘D | Select all / none |
 | Delete or Backspace | Remove from the library (the file stays on disk) |
@@ -48,22 +53,25 @@ with a filmstrip (E, Return, or double-click).
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |
 | ⇧⌘R | Reset the selection to the original |
 | ⌘Z / ⇧⌘Z | Undo and redo changes to looks |
-| Z, or double-click | Single view: fit or 100% |
-| ⌘0 / ⌘1 | Single view: fit / 100% |
+| Z, or double-click | Loupe: fit or 100% |
+| ⌘0 / ⌘1 | Loupe: fit / 100% |
 | ⌘+ / ⌘− | Zoom in and out; in the library, larger and smaller thumbnails |
-| Scroll or pinch | Single view: zoom about the pointer |
-| Drag | Single view: move the photo |
+| Scroll or pinch | Loupe: zoom about the pointer |
+| Drag | Loupe: move the photo |
 | Tab | Show or hide the panel |
 
-Border, in the Negative section, deals with a uniform border round the picture, such as
+Border, in the Exposure section, deals with a uniform border round the picture, such as
 the paper of a photographed print or letterbox bars, found when the photo is opened as
 `twb2.py --frame` finds it. Keep (the default) measures exposure and tones inside the
 border and leaves it in the picture; Strip does the same and shows and exports only the
 picture inside, in every view and thumbnail, without rendering again; Off does not look.
 
-Double-clicking a knob or its name restores its default. The panel's … menu also saves
-and loads looks as JSON and copies the look as `twb2.py` flags. In the single view 100%
-means one pixel of the simulation grid to one pixel of the screen.
+The knobs are grouped as the process runs: Film, Exposure, Lens, Grain, Edge Effects
+(switched on and off at its heading), Print, Reproduction and Simulation. Clicking a
+heading opens or closes it. Double-clicking a knob or its name restores its default; its
+value can also be dragged or typed. Copy, Paste and Reset sit under the knobs, and the
+panel's … menu saves and loads looks as JSON and copies the look as `twb2.py` flags. In
+the loupe 100% means one pixel of the simulation grid to one pixel of the screen.
 
 ## Exports
 

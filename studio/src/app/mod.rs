@@ -1,5 +1,6 @@
 //! The studio window: library, views, controls, import and export.
 
+mod chrome;
 mod controls;
 mod shots;
 mod tiers;
@@ -25,7 +26,7 @@ use workers::{Done, Job, Workers};
 pub enum Mode {
     Grid,
     Survey,
-    Single,
+    Loupe,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -66,9 +67,9 @@ pub struct App {
     clipboard: Option<Settings>,
     /// An edit to the looks is under way (a slider held): one undo step for all of it.
     edit_open: bool,
-    /// Single view: None fits the photo; otherwise screen pixels per grid pixel.
+    /// Loupe: None fits the photo; otherwise screen pixels per grid pixel.
     zoom: Option<f32>,
-    /// Single view: the point of the photo at the middle of the view, as fractions.
+    /// Loupe: the point of the photo at the middle of the view, as fractions.
     center: [f32; 2],
     scroll_to_focus: bool,
     grid_cols: usize,
@@ -312,7 +313,7 @@ impl App {
     // ---------- keys ---------------------------------------------------------------------
 
     fn keys(&mut self, ctx: &egui::Context) {
-        // a dialog takes the keys: Return there means Export, not the single view, and
+        // a dialog takes the keys: Return there means Export, not the loupe, and
         // Delete must not take photos out of the library behind it
         if ctx.wants_keyboard_input() || self.export_form.is_some() || !self.export_errors.is_empty() {
             return;
@@ -386,7 +387,7 @@ impl App {
             self.mode = Mode::Survey;
         }
         if (k(none, Key::E) || k(none, Key::Enter)) && self.lib.focus.is_some() {
-            self.mode = Mode::Single;
+            self.mode = Mode::Loupe;
             self.zoom = None;
         }
         if k(none, Key::Escape) && self.mode != Mode::Grid {
@@ -402,7 +403,7 @@ impl App {
         if k(none, Key::V) && !self.lib.selected().is_empty() {
             self.do_action(ctx, controls::Action::Process(None));
         }
-        if k(none, Key::Z) && self.mode == Mode::Single {
+        if k(none, Key::Z) && self.mode == Mode::Loupe {
             if self.zoom.is_some() {
                 self.zoom = None;
             } else {
@@ -427,7 +428,7 @@ impl App {
         }
         if moved {
             self.scroll_to_focus = true;
-            if self.mode == Mode::Single {
+            if self.mode == Mode::Loupe {
                 self.zoom = None;
             }
         }
@@ -527,7 +528,7 @@ impl App {
         }
     }
 
-    // ---------- single view zoom ---------------------------------------------------------
+    // ---------- loupe zoom ----------------------------------------------------------------
 
     fn current_zoom(&self) -> f32 {
         self.zoom.unwrap_or(self.last_fit)

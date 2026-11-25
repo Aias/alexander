@@ -22,6 +22,7 @@ const FULL_BUDGET: u64 = 1200 << 20;
 const THUMB_BUDGET: u64 = 192 << 20;
 /// Time spent on renders other than the focused photo's in one frame.
 const FRAME_BUDGET: Duration = Duration::from_millis(12);
+const HISTOGRAM_BINS: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tier {
@@ -119,6 +120,8 @@ pub struct Tiers {
     /// The first stage the focused photo's last render had to redo, for the trace.
     pub last_focus_stage: Option<(Tier, Stage, f32)>,
     pub trace: bool,
+    /// The photo, look generation and whether the photo itself is shown, and the counts.
+    histogram: Option<((Id, u64, bool), Vec<f32>)>,
 }
 
 pub fn default_view() -> ViewPlan {
@@ -142,6 +145,7 @@ impl Tiers {
             frame: 1,
             last_focus_stage: None,
             trace: std::env::var("STUDIO_TRACE").is_ok(),
+            histogram: None,
         }
     }
 
@@ -534,7 +538,7 @@ impl Tiers {
                 let view = plan.view.clone();
                 res.plan = Some(plan);
                 res.gen = Some(item.gen);
-                Ok(Some(self.engine.read_display(&mut res.photo, &view)))
+                Ok(Some(self.engine.read_display(&mut res.photo, &view, 1)))
             }
             _ => {
                 if self.loading.contains(&(item.id, long)) {
@@ -544,6 +548,32 @@ impl Tiers {
                 }
             }
         }
+    }
+
+    /// How often each display value is shown, in `HISTOGRAM_BINS` bins from black to white:
+    /// counted on the proxy's render of the look, or on the proxy itself, inside the crop.
+    pub fn histogram(&mut self, item: &Item, before: bool) -> Option<&[f32]> {
+        let source = before || item.look.is_none();
+        let key = (item.id, item.gen, source);
+        if self.histogram.as_ref().is_none_or(|h| h.0 != key) {
+            let p = item.proxy.clone()?;
+            let (w, h, values) = if source {
+                (p.w, p.h, p.rgba.iter().map(|&b| b as f32 / 255.0).collect())
+            } else {
+                self.ensure(Tier::Proxy, item, true, false);
+                let res = self.proxies.get_mut(&item.id)?;
+                let view = Self::view_of(res, item);
+                self.engine.read_display(&mut res.photo, &view, 2)
+            };
+            let [x0, y0, x1, y1] = item.crop().map_or([0, 0, w, h], |a| a.pixels(w, h));
+            let mut bins = vec![0.0; HISTOGRAM_BINS];
+            for i in (y0..y1).flat_map(|y| (x0..x1).map(move |x| 4 * (y * w + x) as usize)) {
+                let luma = 0.2126 * values[i] + 0.7152 * values[i + 1] + 0.0722 * values[i + 2];
+                bins[(luma.clamp(0.0, 1.0) * (HISTOGRAM_BINS - 1) as f32).round() as usize] += 1.0;
+            }
+            self.histogram = Some((key, bins));
+        }
+        self.histogram.as_ref().map(|h| h.1.as_slice())
     }
 
     /// Numbers for the trace: photos on the GPU at each tier and surfaces held.

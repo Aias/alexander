@@ -610,11 +610,12 @@ impl Engine {
         self.gpu.submit(enc);
     }
 
-    /// The finished picture as display values, four floats per pixel, for saving.
-    pub fn read_display(&mut self, photo: &mut Photo, view: &ViewPlan) -> (u32, u32, Vec<f32>) {
-        let (w, h) = photo.size();
+    /// The finished picture as display values, four floats per pixel, for saving; `step`
+    /// picture pixels to a pixel across.
+    pub fn read_display(&mut self, photo: &mut Photo, view: &ViewPlan, step: u32) -> (u32, u32, Vec<f32>) {
+        let (w, h) = (photo.size().0.div_ceil(step), photo.size().1.div_ceil(step));
         let target = self.take(w, h, Format::Rgba32Float);
-        self.draw(photo, view, &Canvas { origin: [0.0, 0.0], scale: 1.0, show_source: false }, &target.view, Format::Rgba32Float, true);
+        self.draw(photo, view, &Canvas { origin: [0.0, 0.0], scale: step as f32, show_source: false }, &target.view, Format::Rgba32Float, true);
         let bytes = self.gpu.read(&target, 16);
         self.give(target);
         (w, h, bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
