@@ -1,0 +1,117 @@
+name: studio
+
+on:
+  pull_request:
+    paths:
+      - "studio/**"
+      - "data/**"
+      - ".github/workflows/studio.yml"
+  push:
+    paths:
+      - "studio/**"
+      - "data/**"
+      - ".github/workflows/studio.yml"
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental artefacts only bloat the cache on one-shot CI builds.
+  CARGO_INCREMENTAL: 0
+
+defaults:
+  run:
+    working-directory: studio
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      # The whole checkout is needed: the app embeds ../data/*.json at compile time.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # mesa-vulkan-drivers gives wgpu a software Vulkan adapter (lavapipe), so
+      # the render tests run instead of skipping. The xcb, xkbcommon and wayland
+      # headers are what winit's X11 and Wayland backends link against.
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libvulkan1 mesa-vulkan-drivers \
+            libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            studio/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('studio/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  macos:
+    # Apple-silicon runner, so the bundle is built and tested natively for arm64.
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            studio/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('studio/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
+
+      # The render tests use Metal when the runner's virtual machine exposes a
+      # GPU and skip themselves with a note when it does not.
+      - name: Test
+        run: cargo test --locked
+
+      - name: Bundle
+        run: macos/bundle.sh
+
+      # ditto keeps the code signature and extended attributes that a plain
+      # zip of the bundle would break.
+      - name: Zip the app
+        run: ditto -c -k --keepParent "target/Alexander Studio.app" "target/Alexander-Studio-macOS-arm64.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Alexander-Studio-macOS-arm64
+          path: studio/target/Alexander-Studio-macOS-arm64.zip
+          if-no-files-found: error
+          retention-days: 14
