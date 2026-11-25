@@ -4,6 +4,7 @@ mod chrome;
 mod controls;
 #[cfg(target_os = "macos")]
 mod photos;
+mod presets;
 mod session;
 mod shots;
 mod tiers;
@@ -142,6 +143,11 @@ pub struct App {
     last_fit: f32,
     /// Library revision and the count of exportable selected photos at it.
     exportable: (u64, usize),
+    presets: Vec<presets::Preset>,
+    /// The name of a preset being made, while it is typed.
+    new_preset: Option<String>,
+    /// The preset under the pointer this frame, to show on the focused photo.
+    preview_wanted: Option<(Id, Settings)>,
     /// Folders photos were opened from, latest first, for Open Recent.
     recent: Vec<PathBuf>,
     /// Whether the session is remembered: not in a scripted run, which starts afresh.
@@ -193,6 +199,9 @@ impl App {
             frame_times: VecDeque::new(),
             last_fit: 1.0,
             exportable: (u64::MAX, 0),
+            presets: presets::load(),
+            new_preset: None,
+            preview_wanted: None,
             recent: Vec::new(),
             remember,
             saved: ((0, Mode::Grid, 0, 0), std::time::Instant::now()),
@@ -768,6 +777,7 @@ impl eframe::App for App {
         }
         self.keys(ctx);
         let actions = self.layout(ctx);
+        self.tiers.set_preview(self.preview_wanted.take());
         for a in actions {
             self.do_action(ctx, a);
         }

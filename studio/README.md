@@ -109,6 +109,13 @@ the paper of a photographed print or letterbox bars, found when the photo is ope
 border and leaves it in the picture; Strip does the same and shows and exports only the
 picture inside, in every view and thumbnail, without rendering again; Off does not look.
 
+Presets head the panel. Resting the pointer on one shows it on the focused photo, and a
+click gives it to every selected photo, in one step that undo takes back. Four come with
+the app: Default, Harder (grade 4.25 at print exposure 0), Copied from a Page and Book
+Page (ink on cream paper). New Preset… keeps the focused photo's look under a name, as a
+look file in the app's data folder under `Presets`; right-clicking one of these updates it
+with the current look, shows it in the Finder or deletes it.
+
 The knobs are grouped as the process runs: Film, Exposure, Lens, Grain, Edge Effects
 (switched on and off at its heading), Print, Reproduction and Simulation. Clicking a
 heading opens or closes it. A setting off its default underlines its name under the

@@ -13,6 +13,7 @@ use alexander_studio::load::{self, Pixels};
 use alexander_studio::params::{Settings, View};
 use alexander_studio::plan::{Plan, Planner, ViewPlan};
 use egui::TextureId;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -23,6 +24,8 @@ const THUMB_BUDGET: u64 = 192 << 20;
 /// Time spent on renders other than the focused photo's in one frame.
 const FRAME_BUDGET: Duration = Duration::from_millis(12);
 const HISTOGRAM_BINS: usize = 128;
+/// Look generations of previews start here, above any a photo reaches by editing.
+const PREVIEW_GEN: u64 = 1 << 62;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tier {
@@ -121,6 +124,9 @@ pub struct Tiers {
     pub trace: bool,
     /// The photo, look generation and whether the photo itself is shown, and the counts.
     histogram: Option<((Id, u64, bool), Vec<f32>)>,
+    /// A look shown on one photo without being given to it, and the generation it renders as.
+    preview: Option<(Id, Settings, u64)>,
+    previews: u64,
 }
 
 pub fn default_view() -> ViewPlan {
@@ -145,6 +151,8 @@ impl Tiers {
             last_focus_stage: None,
             trace: std::env::var("STUDIO_TRACE").is_ok(),
             histogram: None,
+            preview: None,
+            previews: 0,
         }
     }
 
@@ -166,6 +174,22 @@ impl Tiers {
     /// inside the border when the look strips it, otherwise the whole grid.
     pub fn shown(&self, item: &Item) -> ([f32; 2], (u32, u32)) {
         within(item, self.grid_size(item))
+    }
+
+    /// Show `look` on photo `id` in its renders without giving it to the photo, or stop.
+    pub fn set_preview(&mut self, preview: Option<(Id, Settings)>) {
+        if preview.as_ref().map(|(i, l)| (i, l)) != self.preview.as_ref().map(|(i, l, _)| (i, l)) {
+            self.previews += 1;
+            self.preview = preview.map(|(i, l)| (i, l, PREVIEW_GEN + self.previews));
+        }
+    }
+
+    /// `item` as its renders show it: with the previewed look when it is the photo previewed.
+    fn shown_item<'a>(&self, item: &'a Item) -> Cow<'a, Item> {
+        match &self.preview {
+            Some((id, look, gen)) if *id == item.id => Cow::Owned(Item { look: Some(look.clone()), gen: *gen, ..item.clone() }),
+            _ => Cow::Borrowed(item),
+        }
     }
 
     // ---------- asked for during layout ---------------------------------------------------
@@ -244,6 +268,8 @@ impl Tiers {
         let mut first = true;
         for r in &requests {
             let Some(item) = lib.get(r.id) else { continue };
+            let shown = self.shown_item(item);
+            let item = &*shown;
             if item.proxy.is_none() {
                 continue;
             }
@@ -552,6 +578,8 @@ impl Tiers {
     /// How often each display value is shown, in `HISTOGRAM_BINS` bins from black to white:
     /// counted on the proxy's render of the look, or on the proxy itself, inside the crop.
     pub fn histogram(&mut self, item: &Item, before: bool) -> Option<&[f32]> {
+        let shown = self.shown_item(item);
+        let item = &*shown;
         let source = before || item.look.is_none();
         let key = (item.id, item.gen, source);
         if self.histogram.as_ref().is_none_or(|h| h.0 != key) {

@@ -45,7 +45,10 @@ impl App {
         });
         let before = s.clone();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.add_enabled_ui(enabled, |ui| knobs(ui, &mut s));
+            ui.add_enabled_ui(enabled, |ui| {
+                self.presets_ui(ui);
+                knobs(ui, &mut s);
+            });
         });
         if enabled && s != before {
             let ids = self.lib.selection();
@@ -242,7 +245,7 @@ fn check(ui: &mut Ui, label: &str, tip: &str, v: &mut bool, default: bool) {
 
 /// A section of knobs under a heading that opens and closes it. With `switch` the heading
 /// carries a checkbox that turns the section's effect on and off.
-fn section(ui: &mut Ui, name: &str, open: bool, switch: Option<&mut bool>, add: impl FnOnce(&mut Ui)) {
+pub(super) fn section(ui: &mut Ui, name: &str, open: bool, switch: Option<&mut bool>, add: impl FnOnce(&mut Ui)) {
     let mut state = CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(name), open);
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
     if r.clicked() {
