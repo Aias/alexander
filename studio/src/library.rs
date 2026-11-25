@@ -197,18 +197,24 @@ impl Library {
         if self.find_path(&path).is_some() {
             return None;
         }
+        Some(self.restore(path, 0, None, None, false))
+    }
+
+    /// Add a photo remembered from an earlier session, with its copy number, its looks and
+    /// its star, at the end of the library. It opens like a photo just added.
+    pub fn restore(&mut self, path: PathBuf, copy: u32, look: Option<Settings>, stash: Option<Settings>, starred: bool) -> Id {
         let id = self.next_id;
         self.next_id += 1;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         self.rev += 1;
-        self.by_path.insert(path.clone(), id);
+        self.by_path.entry(path.clone()).or_insert(id);
         self.index.insert(id, self.items.len());
-        self.items.push(Item { id, copy: 0, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, frame: None, look: None, stash: None, gen: 0, starred: false });
-        if !self.starred_only {
+        if starred || !self.starred_only {
             self.shown_index.insert(id, self.shown.len());
             self.shown.push(id);
         }
-        Some(id)
+        self.items.push(Item { id, copy, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, frame: None, look, stash, gen: 0, starred });
+        id
     }
 
     /// Take photos out of the library (never off the disk) so that undo can put them back.
@@ -375,6 +381,14 @@ impl Library {
         }
     }
 
+    /// Select `ids` among the photos shown, with the focus on `focus`.
+    pub fn set_selection(&mut self, ids: &[Id], focus: Option<Id>) {
+        self.rev += 1;
+        self.selected = ids.iter().copied().filter(|id| self.shown_index.contains_key(id)).collect();
+        self.focus = focus.filter(|f| self.selected.contains(f)).or_else(|| self.selected.first().copied());
+        self.anchor = self.focus;
+    }
+
     pub fn select_none(&mut self) {
         self.rev += 1;
         self.selected.clear();
@@ -493,7 +507,7 @@ impl Library {
         }
     }
 
-    fn restore(&mut self, snap: Snapshot) -> Snapshot {
+    fn restore_looks(&mut self, snap: Snapshot) -> Snapshot {
         self.rev += 1;
         let ids: Vec<Id> = snap.iter().map(|s| s.0).collect();
         let inverse = self.snapshot(&ids);
@@ -512,7 +526,7 @@ impl Library {
         match step {
             Step::Looks(s) => {
                 let ids = s.iter().map(|x| x.0).collect();
-                (Step::Looks(self.restore(s)), ids)
+                (Step::Looks(self.restore_looks(s)), ids)
             }
             Step::Removed(items) => {
                 let ids: Vec<Id> = items.iter().map(|(_, it)| it.id).collect();

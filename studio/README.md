@@ -37,6 +37,13 @@ copy. The triangle in each of its top corners lights when shadows or highlights 
 pure black or white; clicking either, or J, marks those values in the survey and the
 loupe, highlights red and shadows blue.
 
+The library is remembered between launches: its photos with their looks, virtual copies
+and stars, the selection, the view and the thumbnail size. The app writes it to
+`~/Library/Application Support/studio.alexander.app/library.json` (on Linux,
+`~/.local/share/alexander-studio`) at most once a second while it changes and when it
+quits, and opens the photos again from their files at the next launch. A photo whose file
+has gone shows as an empty tile with a mark, its error in the tooltip.
+
 A look is a set of numbers and nothing else. Every render, on screen or exported, starts
 again from the original file, so changing a look never processes a processed picture.
 
@@ -197,8 +204,6 @@ and quit.
 - JPEG exports carry no embedded ICC profile; untagged JPEG is read as sRGB by browsers
   and photo apps, which is what the values are. PNG exports carry the sRGB chunk.
 - There is no native menu bar; less frequent commands are in the panel's … menu.
-- The library lasts as long as the window; looks live on in exported files and in saved
-  JSON, not in a catalogue.
 - Exporting reads each finished picture back from the GPU on the interface thread, so the
   window pauses for a moment per photo while an export runs.
 - Speed has been measured only on a software GPU, where absolute numbers mean little.

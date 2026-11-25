@@ -4,6 +4,7 @@ mod chrome;
 mod controls;
 #[cfg(target_os = "macos")]
 mod photos;
+mod session;
 mod shots;
 mod tiers;
 mod views;
@@ -38,7 +39,7 @@ pub enum Compare {
     Split,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
     Grid,
     Survey,
@@ -141,6 +142,12 @@ pub struct App {
     last_fit: f32,
     /// Library revision and the count of exportable selected photos at it.
     exportable: (u64, usize),
+    /// Folders photos were opened from, latest first, for Open Recent.
+    recent: Vec<PathBuf>,
+    /// Whether the session is remembered: not in a scripted run, which starts afresh.
+    remember: bool,
+    /// What the session's file last recorded, and when it was written.
+    saved: (session::Saved, std::time::Instant),
     /// The file dialog open, if any, and the paths it gives when it closes.
     dialog: Option<(Dialog, Paths)>,
     waker: Waker,
@@ -155,6 +162,7 @@ impl App {
         let ctx = cc.egui_ctx.clone();
         let workers = Workers::new(move || ctx.request_repaint());
         let shots = shots::Shots::from_env(paths.clone());
+        let remember = shots.is_none();
         let mut app = App {
             lib: Library::new(),
             tiers,
@@ -185,9 +193,15 @@ impl App {
             frame_times: VecDeque::new(),
             last_fit: 1.0,
             exportable: (u64::MAX, 0),
+            recent: Vec::new(),
+            remember,
+            saved: ((0, Mode::Grid, 0, 0), std::time::Instant::now()),
             dialog: None,
             waker: Waker::from(Arc::new(Repaint(cc.egui_ctx.clone()))),
         };
+        if app.remember {
+            app.restore_session();
+        }
         if app.shots.is_none() && !paths.is_empty() {
             app.import(paths);
         }
@@ -197,6 +211,7 @@ impl App {
     // ---------- import ---------------------------------------------------------------------
 
     fn import(&mut self, paths: Vec<PathBuf>) {
+        self.remember_folders(&paths);
         if !paths.is_empty() {
             self.opening += 1;
             self.workers.send(Job::Collect(paths));
@@ -734,6 +749,12 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn on_exit(&mut self) {
+        if self.remember {
+            let _ = self.save_session(true);
+        }
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let t0 = std::time::Instant::now();
         self.poll();
@@ -753,6 +774,9 @@ impl eframe::App for App {
         self.poll_dialog();
         self.export_step();
         self.copy_image_step(ctx);
+        if let Some(wait) = self.remember.then(|| self.save_session(false)).flatten() {
+            ctx.request_repaint_after(wait);
+        }
         let (loads, pending) = self.tiers.process(&self.lib, self.before());
         self.pending = pending;
         // while a knob is held the grid size may be passing through many values
