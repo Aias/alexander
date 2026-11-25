@@ -46,7 +46,7 @@ impl App {
             });
             if !self.lib.is_empty() {
                 let before = self.mode;
-                let views = [(Mode::Grid, "Grid", "G"), (Mode::Survey, "Survey", "N"), (Mode::Loupe, "Loupe", "E")];
+                let views = [(Mode::Grid, "Grid", "G"), (Mode::Survey, "Survey", "N"), (Mode::Detail, "Detail", "E")];
                 ui.put(Rect::from_center_size(bar.center(), vec2(228.0, 26.0)), |ui: &mut Ui| segmented(ui, &mut self.mode, &views));
                 if self.mode != before {
                     self.scroll_to_focus = true;
@@ -60,12 +60,17 @@ impl App {
     pub(super) fn status_bar(&mut self, ui: &mut Ui) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             match self.mode {
-                Mode::Grid => {
-                    let mut size = self.thumb_pt as f64;
-                    controls::slider(ui, &mut size, 80.0..=480.0, 110.0).on_hover_text("⌘+ / ⌘−");
-                    self.thumb_pt = size as f32;
+                Mode::Grid | Mode::Survey => {
+                    if self.mode == Mode::Grid {
+                        let mut size = self.thumb_pt as f64;
+                        controls::slider(ui, &mut size, 80.0..=480.0, 110.0).on_hover_text("⌘+ / ⌘−");
+                        self.thumb_pt = size as f32;
+                        ui.add_space(8.0);
+                    }
+                    self.switch(ui, self.fill, "Fill", "", Command::Fill(true));
+                    self.switch(ui, !self.fill, "Fit", "", Command::Fill(false));
                 }
-                Mode::Loupe if self.cropping.is_none() => {
+                Mode::Detail if self.cropping.is_none() => {
                     if self.zoom != Some(1.0) {
                         ui.label(RichText::new(format!("{:.0}%", self.current_zoom() * 100.0)).color(LABEL));
                     }

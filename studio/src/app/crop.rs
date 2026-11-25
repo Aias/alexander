@@ -1,12 +1,13 @@
-//! Cropping one photo in the loupe: the whole photo shown turned by its angle under a level
-//! frame, which keeps an aspect unless set free and never leaves the photo.
+//! Cropping one photo in Detail: the whole photo shown turned by its angle under a level
+//! frame, which keeps an aspect unless set free and never leaves the photo. Dragging just
+//! outside a corner of the frame turns the photo under it.
 
 use super::views::{LABEL, TEXT};
 use super::{controls, App, Mode};
 use alexander_studio::engine::Canvas;
 use alexander_studio::library::Id;
 use alexander_studio::params::Crop;
-use egui::{pos2, vec2, Button, Color32, CursorIcon, Rect, Sense, Stroke, StrokeKind, Ui};
+use egui::{pos2, vec2, Color32, CursorIcon, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 
 /// The whole photo, level.
 const WHOLE: Crop = Crop { left: 0.0, top: 0.0, right: 1.0, bottom: 1.0, angle: 0.0 };
@@ -20,6 +21,15 @@ pub struct CropEdit {
     crop: Crop,
     /// A place in `ASPECTS`.
     aspect: usize,
+}
+
+impl CropEdit {
+    /// Turn the photo `degrees` further under the frame, shrinking the frame to stay on a
+    /// `grid` photo.
+    pub fn turn(&mut self, degrees: f64, grid: (u32, u32)) {
+        self.crop.angle = (self.crop.angle + degrees).clamp(-45.0, 45.0);
+        self.crop = fit(self.crop, grid.0 as f64, grid.1 as f64);
+    }
 }
 
 /// Whether the frame of `c` lies inside a `w` × `h` photo turned under it, as the canvas
@@ -67,8 +77,9 @@ impl App {
     pub(super) fn start_crop(&mut self) {
         let Some(item) = self.lib.focus.and_then(|f| self.lib.get(f)) else { return };
         self.cropping = Some(CropEdit { id: item.id, crop: item.crop().unwrap_or(WHOLE), aspect: 0 });
-        self.mode = Mode::Loupe;
+        self.mode = Mode::Detail;
         self.zoom = None;
+        self.panel = true;
     }
 
     /// Give the photo the crop drawn, as one step undo takes back.
@@ -80,62 +91,47 @@ impl App {
         self.lib.set_look(&[e.id], Some(look));
     }
 
-    /// The crop section of the panel: the button that starts cropping, or while cropping the
-    /// frame's aspect, the photo's angle and the way out.
+    /// The panel while cropping: the frame's aspect, the photo's angle and the way out.
     pub(super) fn crop_ui(&mut self, ui: &mut Ui) {
-        controls::section(ui, "Crop", true, None, |ui| {
-            let can = self.can(&super::Command::Crop);
-            let Some(mut e) = self.cropping.clone() else {
-                let cropped = self.lib.focus.and_then(|f| self.lib.get(f)).and_then(|it| it.look.as_ref()).is_some_and(|l| l.crop.is_some());
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(can, Button::new("Crop")).on_hover_text("R").clicked() {
-                        self.start_crop();
-                    }
-                    if let (true, Some(id)) = (cropped && ui.add_enabled(can, Button::new("Clear")).clicked(), self.lib.focus) {
-                        self.cropping = Some(CropEdit { id, crop: WHOLE, aspect: 0 });
-                        self.finish_crop();
-                    }
-                });
-                return;
-            };
-            let Some((w, h)) = self.lib.get(e.id).map(|it| self.tiers.grid_size(it)).map(|(w, h)| (w as f64, h as f64)) else { return };
-            let options: Vec<(usize, &str)> = ASPECTS.iter().enumerate().map(|(i, a)| (i, a.0)).collect();
-            let was = e.aspect;
-            if controls::row(ui, "Aspect", "", e.aspect != 0, |ui| controls::combo(ui, "aspect", &mut e.aspect, &options)) {
-                e.aspect = 0;
+        let Some(mut e) = self.cropping.clone() else { return };
+        let Some((w, h)) = self.lib.get(e.id).map(|it| self.tiers.grid_size(it)).map(|(w, h)| (w as f64, h as f64)) else { return };
+        controls::title(ui, "Crop", Sense::hover());
+        let options: Vec<(usize, &str)> = ASPECTS.iter().enumerate().map(|(i, a)| (i, a.0)).collect();
+        let was = e.aspect;
+        if controls::row(ui, "Aspect", "", e.aspect != 0, |ui| controls::combo(ui, "aspect", &mut e.aspect, &options)) {
+            e.aspect = 0;
+        }
+        if e.aspect != was {
+            if let Some(r) = self.kept_ratio(&e, w, h) {
+                let (cx, cy, fw) = ((e.crop.left + e.crop.right) / 2.0, (e.crop.top + e.crop.bottom) / 2.0, (e.crop.right - e.crop.left) * w);
+                let fh = fw / r / h;
+                e.crop = fit(Crop { top: cy - fh / 2.0, bottom: cy + fh / 2.0, left: cx - fw / w / 2.0, right: cx + fw / w / 2.0, ..e.crop }, w, h);
             }
-            if e.aspect != was {
-                if let Some(r) = self.kept_ratio(&e, w, h) {
-                    let (cx, cy, fw) = ((e.crop.left + e.crop.right) / 2.0, (e.crop.top + e.crop.bottom) / 2.0, (e.crop.right - e.crop.left) * w);
-                    let fh = fw / r / h;
-                    e.crop = fit(Crop { top: cy - fh / 2.0, bottom: cy + fh / 2.0, left: cx - fw / w / 2.0, right: cx + fw / w / 2.0, ..e.crop }, w, h);
+        }
+        let before = e.crop.angle;
+        controls::knob(ui, "Straighten", "Degrees the photo turns clockwise under the frame", &mut e.crop.angle, -45.0..=45.0, 0.0, 1);
+        if e.crop.angle != before {
+            e.crop = fit(e.crop, w, h);
+        }
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            if ui.button("Reset").clicked() {
+                e.crop = WHOLE;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Done").on_hover_text("Return").clicked() {
+                    self.cropping = Some(e.clone());
+                    self.finish_crop();
+                } else if ui.button("Cancel").on_hover_text("Esc").clicked() {
+                    self.cropping = None;
+                } else {
+                    self.cropping = Some(e.clone());
                 }
-            }
-            let before = e.crop.angle;
-            controls::knob(ui, "Straighten", "Degrees the photo turns clockwise under the frame", &mut e.crop.angle, -45.0..=45.0, 0.0, 1);
-            if e.crop.angle != before {
-                e.crop = fit(e.crop, w, h);
-            }
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui.button("Reset").clicked() {
-                    e.crop = WHOLE;
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Done").on_hover_text("Return").clicked() {
-                        self.cropping = Some(e.clone());
-                        self.finish_crop();
-                    } else if ui.button("Cancel").on_hover_text("Esc").clicked() {
-                        self.cropping = None;
-                    } else {
-                        self.cropping = Some(e.clone());
-                    }
-                });
             });
         });
     }
 
-    /// The loupe while cropping: the whole photo turned under the frame, and the frame with
+    /// Detail while cropping: the whole photo turned under the frame, and the frame with
     /// its handles.
     pub(super) fn crop_view(&mut self, ui: &mut Ui, rect: Rect) {
         let Some(mut e) = self.cropping.clone() else { return };
@@ -169,6 +165,26 @@ impl App {
         p.rect_stroke(frame, 0.0, Stroke::new(1.0f32, TEXT), StrokeKind::Outside);
         let (fw, fh) = (w as f64, h as f64);
         let ratio = self.kept_ratio(&e, fw, fh);
+        let corners = [frame.left_top(), frame.right_top(), frame.left_bottom(), frame.right_bottom()];
+        let near = |p: Pos2| !frame.contains(p) && corners.iter().any(|c| c.distance(p) < 36.0);
+        let turn = ui.interact(rect, egui::Id::new("crop-turn"), Sense::drag());
+        let turning = egui::Id::new("crop-turning");
+        if turn.drag_started() {
+            let at = ui.input(|i| i.pointer.press_origin()).is_some_and(near);
+            ui.data_mut(|d| d.insert_temp(turning, at));
+        }
+        let turning = turn.dragged() && ui.data(|d| d.get_temp(turning)).unwrap_or(false);
+        if let Some(at) = turn.hover_pos().filter(|&p| turning || near(p)) {
+            turn_cursor(ui.ctx(), at, at - frame.center());
+        }
+        if let Some(at) = turn.interact_pointer_pos().filter(|_| turning) {
+            let c = frame.center();
+            let a = (at - c).angle() - (at - turn.drag_delta() - c).angle();
+            let a = (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            e.turn(a.to_degrees() as f64, (gw, gh));
+            self.cropping = Some(e);
+            return;
+        }
         let mut moved = None;
         let inside = ui.interact(frame, egui::Id::new("crop-frame"), Sense::drag());
         if inside.hovered() || inside.dragged() {
@@ -231,5 +247,25 @@ impl App {
             e.crop = next;
             self.cropping = Some(e);
         }
+    }
+}
+
+/// A curved arrow with a head at each end in place of the pointer at `at`, bowed toward
+/// `out`, for turning the photo.
+fn turn_cursor(ctx: &egui::Context, at: Pos2, out: Vec2) {
+    ctx.set_cursor_icon(CursorIcon::None);
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("turn-cursor")));
+    let (a0, c) = (out.angle(), at - out.normalized() * 7.0);
+    let arc: Vec<Pos2> = (0..=10).map(|i| c + Vec2::angled(a0 - 0.8 + 0.16 * i as f32) * 9.0).collect();
+    let heads = [(arc[0], -1.0), (arc[10], 1.0)].map(|(tip, turn)| {
+        let along = Vec2::angled(a0 + turn * 0.8 + turn * std::f32::consts::FRAC_PI_2);
+        let side = along.rot90() * 3.5;
+        vec![tip + along * 4.0, tip - along * 1.5 + side, tip - along * 1.5 - side]
+    });
+    for (width, colour) in [(3.5f32, Color32::from_black_alpha(160)), (1.5, Color32::WHITE)] {
+        p.add(Shape::line(arc.clone(), Stroke::new(width, colour)));
+    }
+    for head in heads {
+        p.add(Shape::convex_polygon(head, Color32::WHITE, Stroke::new(1.0f32, Color32::from_black_alpha(160))));
     }
 }

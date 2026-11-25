@@ -57,7 +57,7 @@ impl App {
     pub(super) fn presets_ui(&mut self, ui: &mut Ui) {
         let focus = self.lib.focus.filter(|f| self.lib.selected().contains(f));
         let focus_look = focus.and_then(|f| self.lib.get(f)).and_then(|it| it.look.clone());
-        controls::section(ui, "Presets", true, None, |ui| {
+        controls::section(ui, "Presets", false, None, |ui| {
             let mut apply = None;
             let mut changed = false;
             for p in &self.presets {

@@ -40,6 +40,8 @@ pub enum Command {
     Clipping,
     /// Closer, or with false further away: larger or smaller thumbnails in the grid.
     Zoom(bool),
+    /// Photos fill their cells in Grid and Survey, or with false fit inside them.
+    Fill(bool),
     Fit,
     Actual,
     StarredOnly,
@@ -62,11 +64,12 @@ impl App {
             Command::Process(_) | Command::Star | Command::VirtualCopy | Command::Remove | Command::LoadLook => selected,
             #[cfg(target_os = "macos")]
             Command::ShowInFinder => selected,
-            Command::View(Mode::Loupe) => focus.is_some(),
+            Command::View(Mode::Detail) => focus.is_some(),
             Command::Crop => self.cropping.is_some() || self.lib.selected().len() == 1 && focus.is_some_and(|it| it.ready() && it.look.is_some()),
             Command::Swap => self.compare == Compare::Split,
             Command::Zoom(_) => self.mode != Mode::Survey,
-            Command::Fit | Command::Actual => self.mode == Mode::Loupe,
+            Command::Fit | Command::Actual => self.mode == Mode::Detail,
+            Command::Fill(_) => self.mode != Mode::Detail,
             _ => true,
         }
     }
@@ -111,7 +114,7 @@ impl App {
                 }
             }
             Command::Star => {
-                let ids = if self.mode == Mode::Loupe { self.lib.focus.into_iter().collect() } else { self.lib.selection() };
+                let ids = if self.mode == Mode::Detail { self.lib.focus.into_iter().collect() } else { self.lib.selection() };
                 self.lib.toggle_starred(&ids);
             }
             Command::VirtualCopy => {
@@ -142,6 +145,7 @@ impl App {
                     _ => self.zoom = Some(self.current_zoom() * f),
                 }
             }
+            Command::Fill(on) => self.fill = on,
             Command::Fit => self.zoom = None,
             Command::Actual => self.zoom_100(),
             Command::StarredOnly => self.lib.set_starred_only(!self.lib.starred_only()),

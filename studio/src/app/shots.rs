@@ -86,18 +86,18 @@ impl Shots {
             }
             5 if settled => self.shot(ctx, "3-selected"),
             6 => {
-                app.mode = Mode::Loupe;
+                app.mode = Mode::Detail;
                 app.panel = true;
                 app.zoom = None;
                 self.step += 1;
             }
-            7 if settled => self.shot(ctx, "4-loupe"),
+            7 if settled => self.shot(ctx, "4-detail"),
             8 => {
                 app.zoom = Some(1.0);
                 app.center = [0.45, 0.5];
                 self.step += 1;
             }
-            9 if settled => self.shot(ctx, "5-loupe-100"),
+            9 if settled => self.shot(ctx, "5-detail-100"),
             10 => {
                 // a late-stage knob: only the print and what follows should be redone
                 let id = app.lib.focus.unwrap();
@@ -123,18 +123,42 @@ impl Shots {
             15 if settled => self.shot(ctx, "8-split-survey"),
             16 => {
                 app.compare = Compare::After;
+                app.fill = true;
+                self.step += 1;
+            }
+            17 if settled => self.shot(ctx, "9-survey-fill"),
+            18 => {
+                app.mode = Mode::Grid;
+                self.step += 1;
+            }
+            19 if settled => self.shot(ctx, "10-grid-fill"),
+            20 => {
+                // the focused photo cropped at an angle, with the reference beside it
+                app.fill = false;
+                app.lib.click(app.lib.focus.unwrap());
+                app.start_crop();
+                if let Some(e) = &mut app.cropping {
+                    e.turn(8.0, app.tiers.grid_size(app.lib.get(e.id).unwrap()));
+                }
+                app.reference.shown = true;
+                self.step += 1;
+            }
+            21 if settled => self.shot(ctx, "11-crop-reference"),
+            22 => {
+                app.cropping = None;
+                app.reference.shown = false;
                 app.open_export();
                 self.step += 1;
             }
-            17 if settled && self.idle >= 12 => self.shot(ctx, "9-export"),
-            18 => {
+            23 if settled && self.idle >= 12 => self.shot(ctx, "12-export"),
+            24 => {
                 app.export_form = None;
                 let dir = self.dir.join("export");
                 let _ = std::fs::create_dir_all(&dir);
                 app.start_export(ExportForm { dir, dir_ok: true, format: Format::Png8, size: SizeChoice::Original, long: 0 });
                 self.step += 1;
             }
-            19 if settled => {
+            25 if settled => {
                 eprintln!("export finished; errors: {:?}", app.export_errors);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 self.step += 1;

@@ -1,15 +1,15 @@
 //! The reference: a picture to work against, such as a scanned page of the book, shown beside
-//! the photo being edited. It goes through the pictures added to it, and floats over the main
-//! window or stands in a window of its own, where pictures can also be dropped on it.
+//! the photo being edited. Its pictures are the ones in the References folder of the app's
+//! data folder, by name; pictures added to it are copied there. It floats over the main window
+//! or stands in a window of its own, where pictures can also be dropped on it.
 
 use super::views::LABEL;
 use super::workers::Job;
-use super::{App, Dialog};
+use super::{session, App, Dialog};
 use egui::{Align, Button, Color32, Layout, RichText, TextureHandle, Ui, ViewportBuilder, ViewportId};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Default)]
 pub struct Reference {
     pub pictures: Vec<PathBuf>,
     /// The picture shown, a place in `pictures`.
@@ -24,24 +24,56 @@ pub struct Reference {
 /// Long edge pictures are read at: sharp in a large window, small on the GPU.
 pub const LONG: u32 = 2048;
 
+fn folder() -> PathBuf {
+    session::data_dir().join("References")
+}
+
+/// The pictures in the folder, by name.
+fn listed() -> Vec<PathBuf> {
+    let picture = |p: &PathBuf| p.extension().and_then(|e| e.to_str()).is_some_and(|e| alexander_studio::load::extensions().iter().any(|x| x.eq_ignore_ascii_case(e)));
+    let mut pictures: Vec<PathBuf> = std::fs::read_dir(folder()).into_iter().flatten().flatten().map(|e| e.path()).filter(picture).collect();
+    pictures.sort();
+    pictures
+}
+
 impl Reference {
+    pub fn new() -> Reference {
+        Reference { pictures: listed(), at: 0, shown: false, apart: false, loaded: HashMap::new() }
+    }
+
     fn current(&self) -> Option<&PathBuf> {
         self.pictures.get(self.at.min(self.pictures.len().saturating_sub(1)))
     }
 
-    /// Add pictures not yet among them and show the first of them.
+    /// Copy pictures into the folder, in place of any of the same name, and show the first.
     pub fn add(&mut self, paths: Vec<PathBuf>) {
+        let _ = std::fs::create_dir_all(folder());
         let mut first = None;
         for p in paths {
-            let i = self.pictures.iter().position(|q| *q == p).unwrap_or_else(|| {
-                self.pictures.push(p);
-                self.pictures.len() - 1
-            });
-            first.get_or_insert(i);
+            let Some(to) = p.file_name().map(|n| folder().join(n)) else { continue };
+            if to == p || std::fs::copy(&p, &to).is_ok() {
+                self.loaded.remove(&to);
+                first.get_or_insert(to);
+            }
         }
-        if let Some(i) = first {
+        self.pictures = listed();
+        if let Some(i) = first.and_then(|f| self.pictures.iter().position(|p| *p == f)) {
             self.at = i;
             self.shown = true;
+        }
+    }
+
+    /// Move the picture shown to the Trash, or on other systems delete it.
+    fn remove(&mut self) {
+        let Some(p) = self.current().cloned() else { return };
+        #[cfg(target_os = "macos")]
+        let gone = objc2_foundation::NSURL::from_file_path(&p).is_some_and(|url| objc2_foundation::NSFileManager::defaultManager().trashItemAtURL_resultingItemURL_error(&url, None).is_ok());
+        #[cfg(not(target_os = "macos"))]
+        let gone = std::fs::remove_file(&p).is_ok();
+        if gone {
+            self.loaded.remove(&p);
+            self.pictures = listed();
+            self.at = self.at.min(self.pictures.len().saturating_sub(1));
         }
     }
 
@@ -94,10 +126,6 @@ impl App {
                 if ui.button(if self.reference.apart { "Pop In" } else { "Pop Out" }).clicked() {
                     self.reference.apart = !self.reference.apart;
                 }
-                if ui.add_enabled(n > 0, Button::new("Remove")).clicked() {
-                    self.reference.pictures.remove(self.reference.at.min(n - 1));
-                    self.reference.at = self.reference.at.min(self.reference.pictures.len().saturating_sub(1));
-                }
                 if ui.button("Add…").clicked() {
                     let d = rfd::AsyncFileDialog::new().add_filter("Pictures", alexander_studio::load::extensions());
                     self.ask(Dialog::Reference, async move { super::paths(d.pick_files().await.into_iter().flatten()) });
@@ -128,6 +156,19 @@ impl App {
             }
             None => {}
         }
-        ui.allocate_rect(area, egui::Sense::hover());
+        if n == 0 {
+            return;
+        }
+        ui.allocate_rect(area, egui::Sense::click()).context_menu(|ui| {
+            #[cfg(target_os = "macos")]
+            if let (true, Some(p)) = (ui.button("Show in Finder").clicked(), self.reference.current().cloned()) {
+                std::thread::spawn(move || std::process::Command::new("/usr/bin/open").arg("-R").arg(p).status());
+                ui.close_menu();
+            }
+            if ui.button("Move to Trash").clicked() {
+                self.reference.remove();
+                ui.close_menu();
+            }
+        });
     }
 }

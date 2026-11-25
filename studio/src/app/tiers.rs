@@ -194,12 +194,14 @@ impl Tiers {
 
     // ---------- asked for during layout ---------------------------------------------------
 
-    /// A thumbnail of `item` for a box of `max` physical pixels: its texture (drawn at
-    /// some size, maybe an older look) and the size it should be shown at.
-    pub fn thumb(&mut self, item: &Item, max: [u32; 2], rank: u8) -> (Option<TextureId>, [u32; 2]) {
+    /// A thumbnail of `item` for a box of `max` physical pixels, fitting inside it or, with
+    /// `fill`, covering it: its texture (drawn at some size, maybe an older look) and the
+    /// size it should be shown at.
+    pub fn thumb(&mut self, item: &Item, max: [u32; 2], fill: bool, rank: u8) -> (Option<TextureId>, [u32; 2]) {
         let Some(p) = &item.proxy else { return (None, [0, 0]) };
         let (_, (pw, ph), _) = within(item, (p.w, p.h));
-        let s = (max[0] as f32 / pw as f32).min(max[1] as f32 / ph as f32);
+        let (sx, sy) = (max[0] as f32 / pw as f32, max[1] as f32 / ph as f32);
+        let s = if fill { sx.max(sy) } else { sx.min(sy) };
         let size = [((pw as f32 * s).round() as u32).clamp(1, pw.max(1) * 2), ((ph as f32 * s).round() as u32).clamp(1, ph.max(1) * 2)];
         self.requests.push(Request { id: item.id, want: Want::Thumb, size, rank });
         (self.thumbs.get(&item.id).filter(|t| t.key.is_some()).map(|t| t.id), size)

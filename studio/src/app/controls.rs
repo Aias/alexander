@@ -22,6 +22,11 @@ impl App {
         let focus = self.lib.focus.filter(|_| !self.lib.selected().is_empty()).and_then(|f| self.lib.get(f));
         let before = self.before();
         histogram(ui, focus.and_then(|it| self.tiers.histogram(it, before)), &mut self.clipping);
+        if self.cropping.is_some() {
+            ui.add_space(10.0);
+            self.crop_ui(ui);
+            return;
+        }
         let processed = focus.is_some_and(|it| it.look.is_some());
         let mut s = focus.and_then(|it| it.look.clone().or_else(|| it.stash.clone())).unwrap_or_default();
         let enabled = focus.is_some();
@@ -37,7 +42,6 @@ impl App {
             ui.add_enabled_ui(enabled, |ui| {
                 self.presets_ui(ui);
                 knobs(ui, &mut s);
-                self.crop_ui(ui);
             });
         });
         if enabled && s != before {
@@ -189,7 +193,7 @@ pub(super) fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: Rang
         let r = slider(ui, v, range, w);
         ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
         ui.spacing_mut().button_padding.x = 2.0;
-        ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).fixed_decimals(decimals));
+        ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).custom_formatter(|v, _| format!("{v:.decimals$}")));
         if reset || r.double_clicked() {
             *v = default;
         }
@@ -233,17 +237,23 @@ fn check(ui: &mut Ui, label: &str, tip: &str, v: &mut bool, default: bool) {
     }
 }
 
+/// A heading over a rule across the panel, brighter under the pointer when it can be clicked.
+pub(super) fn title(ui: &mut Ui, name: &str, sense: Sense) -> (Rect, egui::Response) {
+    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), sense);
+    ui.painter().hline(rect.x_range(), rect.top(), Stroke::new(1.0f32, RULE));
+    ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, name, FontId::proportional(12.5), if r.hovered() && sense.senses_click() { Color32::WHITE } else { TEXT });
+    (rect, r)
+}
+
 /// A section of knobs under a heading that opens and closes it. With `switch` the heading
 /// carries a checkbox that turns the section's effect on and off.
 pub(super) fn section(ui: &mut Ui, name: &str, open: bool, switch: Option<&mut bool>, add: impl FnOnce(&mut Ui)) {
     let mut state = CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(name), open);
-    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+    let (rect, r) = title(ui, name, Sense::click());
     if r.clicked() {
         state.toggle(ui);
     }
     let p = ui.painter();
-    p.hline(rect.x_range(), rect.top(), Stroke::new(1.0f32, RULE));
-    p.text(rect.left_center(), Align2::LEFT_CENTER, name, FontId::proportional(12.5), if r.hovered() { Color32::WHITE } else { TEXT });
     let turn = egui::emath::Rot2::from_angle((state.openness(ui.ctx()) - 1.0) * std::f32::consts::FRAC_PI_2);
     let tip = pos2(rect.right() - 6.0, rect.center().y);
     p.add(Shape::convex_polygon([vec2(-3.5, -2.0), vec2(3.5, -2.0), vec2(0.0, 2.5)].map(|d| tip + turn * d).to_vec(), LABEL, Stroke::NONE));
@@ -304,7 +314,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
     section(ui, "Lens", true, None, |ui| {
         knob(ui, "Softness", "Blur on the film, µm", &mut s.lens_um, 0.0..=40.0, d.lens_um, 1);
         knob(ui, "Softness shape", "2 is a Gaussian; lower adds a long faint skirt", &mut s.lens_exponent, 0.6..=2.0, d.lens_exponent, 2);
-        knob(ui, "Halation", "Glow around bright areas", &mut s.halation, 0.0..=0.2, d.halation, 3);
+        knob(ui, "Halation", "Glow around bright areas", &mut s.halation, 0.0..=0.2, d.halation, 2);
         knob(ui, "Halation width", "µm", &mut s.halation_um, 10.0..=200.0, d.halation_um, 0);
     });
     section(ui, "Grain", true, None, |ui| {
@@ -321,7 +331,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
     section(ui, "Print", true, None, |ui| {
         knob(ui, "Grade", "Paper grade", &mut s.grade, -1.0..=5.0, d.grade, 2);
         knob(ui, "Exposure", "Stops; more is darker", &mut s.print_ev, -2.5..=2.5, d.print_ev, 2);
-        knob(ui, "Grey density", "Print density of a metered grey", &mut s.print_grey, 0.3..=1.3, d.print_grey, 3);
+        knob(ui, "Grey density", "Print density of a metered grey", &mut s.print_grey, 0.3..=1.3, d.print_grey, 2);
         knob(ui, "Enlarger blur", "µm on the film", &mut s.enlarger_um, 0.0..=15.0, d.enlarger_um, 1);
         knob(ui, "House tones", "0: straight print. 1: the book's tone range", &mut s.house, 0.0..=1.0, d.house, 2);
     });
@@ -332,8 +342,8 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
             Repro::Copy => {
                 knob(ui, "Copy blur", "Thousandths of the long edge", &mut s.copy_blur, 0.0..=2.0, d.copy_blur, 2);
                 knob(ui, "Copy contrast", "", &mut s.copy_gain, 0.5..=2.0, d.copy_gain, 2);
-                knob(ui, "Highlight drop", "Highlight dot lost at each printing", &mut s.copy_drop, 0.0..=0.3, d.copy_drop, 3);
-                knob(ui, "Shadow fill", "Shadow tone that closes to solid ink", &mut s.copy_fill, 0.7..=1.0, d.copy_fill, 3);
+                knob(ui, "Highlight drop", "Highlight dot lost at each printing", &mut s.copy_drop, 0.0..=0.3, d.copy_drop, 2);
+                knob(ui, "Shadow fill", "Shadow tone that closes to solid ink", &mut s.copy_fill, 0.7..=1.0, d.copy_fill, 2);
                 knob(ui, "Source ink", "Solid ink density on the source page", &mut s.copy_ink, 0.8..=2.5, d.copy_ink, 2);
             }
             Repro::Book => {
@@ -349,10 +359,10 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
                 }
                 knob(ui, "Screen", "Lines per inch", &mut s.lpi, 65.0..=200.0, d.lpi, 0);
                 knob(ui, "Ink density", "1.20 uncoated, 1.85 coated", &mut s.ink_density, 0.8..=2.2, d.ink_density, 2);
-                knob(ui, "Dot gain", "", &mut s.dot_gain, 0.0..=0.3, d.dot_gain, 3);
-                knob(ui, "Smallest dot", "", &mut s.min_dot, 0.0..=0.1, d.min_dot, 3);
-                knob(ui, "Camera blur", "Copy camera blur on the page, mm", &mut s.copy_blur_mm, 0.0..=0.2, d.copy_blur_mm, 3);
-                knob(ui, "Paper scatter", "Light spread in the paper, mm", &mut s.paper_scatter_mm, 0.0..=0.2, d.paper_scatter_mm, 3);
+                knob(ui, "Dot gain", "", &mut s.dot_gain, 0.0..=0.3, d.dot_gain, 2);
+                knob(ui, "Smallest dot", "", &mut s.min_dot, 0.0..=0.1, d.min_dot, 2);
+                knob(ui, "Camera blur", "Copy camera blur on the page, mm", &mut s.copy_blur_mm, 0.0..=0.2, d.copy_blur_mm, 2);
+                knob(ui, "Paper scatter", "Light spread in the paper, mm", &mut s.paper_scatter_mm, 0.0..=0.2, d.paper_scatter_mm, 2);
             }
         }
     });
@@ -364,8 +374,8 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
             }
             s.view = v;
             if s.view_mode() == View::Scan {
-                knob(ui, "Scan black", "Display value of solid ink", &mut s.scan_black, 0.0..=0.3, d.scan_black, 3);
-                knob(ui, "Scan white", "Page value sent to white", &mut s.scan_white, 0.7..=1.0, d.scan_white, 3);
+                knob(ui, "Scan black", "Display value of solid ink", &mut s.scan_black, 0.0..=0.3, d.scan_black, 2);
+                knob(ui, "Scan white", "Page value sent to white", &mut s.scan_white, 0.7..=1.0, d.scan_white, 2);
             }
         });
     }

@@ -418,8 +418,9 @@ fn sample_picture(pos: vec2<f32>, src: bool) -> vec3<f32> {
         }
         return max(acc, vec3<f32>(0.0));
     }
-    // reduced: average the picture pixels each screen pixel covers, in linear light
-    let lvl = i32(u.v[0].w);
+    // reduced: average the picture pixels each screen pixel covers, in linear light; the
+    // photo itself has no half-size copies
+    let lvl = select(i32(u.v[0].w), 0, src);
     let f = exp2(f32(lvl));
     let lo = (c - 0.5 * s) / f;
     let hi = (c + 0.5 * s) / f;

@@ -35,7 +35,7 @@ block2 = "~0.6.2"
 muda = { version = "~0.22.0", default-features = false }
 objc2 = "~0.6.5"
 objc2-app-kit = { version = "~0.3.2", default-features = false, features = ["std", "block2", "NSApplication", "NSBitmapImageRep", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSResponder", "NSView", "NSViewController", "NSWindow"] }
-objc2-foundation = { version = "~0.3.2", default-features = false, features = ["std", "block2", "objc2-core-services", "NSAppleEventDescriptor", "NSAppleEventManager", "NSArray", "NSError", "NSGeometry", "NSItemProvider", "NSNotification", "NSObject", "NSOperation", "NSProgress", "NSString", "NSURL"] }
+objc2-foundation = { version = "~0.3.2", default-features = false, features = ["std", "block2", "objc2-core-services", "NSAppleEventDescriptor", "NSAppleEventManager", "NSArray", "NSError", "NSFileManager", "NSGeometry", "NSItemProvider", "NSNotification", "NSObject", "NSOperation", "NSProgress", "NSString", "NSURL"] }
 objc2-photos = { version = "~0.3.2", default-features = false, features = ["std", "PHPhotoLibrary"] }
 objc2-photos-ui = { version = "~0.3.2", default-features = false, features = ["std", "block2", "PHPicker", "objc2-app-kit", "objc2-photos"] }
 

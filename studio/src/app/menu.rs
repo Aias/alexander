@@ -93,7 +93,7 @@ impl MenuBar {
         let view = submenu("View", &[
                 &b.check("Grid", key(PLAIN, Code::KeyG), Command::View(Mode::Grid), |a| a.mode == Mode::Grid),
                 &b.check("Survey", key(PLAIN, Code::KeyN), Command::View(Mode::Survey), |a| a.mode == Mode::Survey),
-                &b.check("Loupe", key(PLAIN, Code::KeyE), Command::View(Mode::Loupe), |a| a.mode == Mode::Loupe),
+                &b.check("Detail", key(PLAIN, Code::KeyE), Command::View(Mode::Detail), |a| a.mode == Mode::Detail),
                 &sep(),
                 &b.check("Before", key(PLAIN, Code::Backslash), Command::Compare(Compare::Before), |a| a.compare == Compare::Before),
                 &b.check("Split", key(PLAIN, Code::KeyY), Command::Compare(Compare::Split), |a| a.compare == Compare::Split),

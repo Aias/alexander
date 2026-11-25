@@ -98,6 +98,11 @@ fn uv() -> Rect {
     Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))
 }
 
+/// Where the part `shown` lies in a picture drawn over `full`, in texture coordinates.
+fn uv_within(shown: Rect, full: Rect) -> Rect {
+    Rect::from_min_max(pos2((shown.min.x - full.min.x) / full.width(), (shown.min.y - full.min.y) / full.height()), pos2((shown.max.x - full.min.x) / full.width(), (shown.max.y - full.min.y) / full.height()))
+}
+
 /// A dark label over a picture, with its corner `align` at `at`.
 fn pill(ui: &Ui, at: Pos2, align: Align2, text: &str) {
     let g = ui.painter().layout_no_wrap(text.into(), FontId::proportional(11.5), Color32::from_gray(230));
@@ -122,6 +127,10 @@ impl App {
         if has_photos && self.mode != Mode::Grid {
             egui::TopBottomPanel::bottom("filmstrip").exact_height(92.0).frame(egui::Frame::NONE.fill(BAR)).show(ctx, |ui| self.filmstrip(ui));
         }
+        if has_photos {
+            let frame = egui::Frame::side_top_panel(&ctx.style()).inner_margin(Margin::symmetric(6, 10));
+            egui::SidePanel::right("rail").exact_width(44.0).resizable(false).frame(frame).show(ctx, |ui| self.rail(ui));
+        }
         if has_photos && self.panel {
             let frame = egui::Frame::side_top_panel(&ctx.style()).inner_margin(Margin::symmetric(12, 10));
             egui::SidePanel::right("controls").resizable(true).default_width(340.0).width_range(320.0..=460.0).frame(frame).show(ctx, |ui| self.panel_ui(ui, &mut actions));
@@ -133,7 +142,7 @@ impl App {
                     match self.mode {
                         Mode::Grid => self.grid(ui),
                         Mode::Survey => self.survey(ui),
-                        Mode::Loupe => self.loupe(ui),
+                        Mode::Detail => self.detail(ui),
                     }
                     if self.before() {
                         pill(ui, ui.max_rect().min + vec2(12.0, 12.0), Align2::LEFT_TOP, "Before");
@@ -150,6 +159,56 @@ impl App {
         self.errors_window(ctx);
         self.reference_ui(ctx);
         actions
+    }
+
+    /// The column of tools at the window's right edge, as in Lightroom: Edit and Crop choose
+    /// what the panel holds, and choosing the one it holds hides it; Reference shows the
+    /// reference or hides it.
+    fn rail(&mut self, ui: &mut Ui) {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        let ctx = ui.ctx().clone();
+        if self.rail_button(ui, 0, self.panel && self.cropping.is_none(), true, "Edit") {
+            if self.cropping.is_some() {
+                self.finish_crop();
+            } else {
+                self.panel = !self.panel;
+            }
+        }
+        let can_crop = self.can(&Command::Crop);
+        if self.rail_button(ui, 1, self.panel && self.cropping.is_some(), can_crop, "Crop (R)") {
+            if self.cropping.is_some() && !self.panel {
+                self.panel = true;
+            } else {
+                self.run(&ctx, Command::Crop);
+            }
+        }
+        ui.add_space(4.0);
+        let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+        ui.painter().hline(line.x_range().shrink(4.0), line.center().y, Stroke::new(1.0f32, Color32::from_gray(56)));
+        ui.add_space(4.0);
+        if self.rail_button(ui, 2, self.reference.shown, true, "Reference (⇧R)") {
+            self.run(&ctx, Command::Reference);
+        }
+    }
+
+    /// A tool in the rail, lit when `on`: true when clicked.
+    fn rail_button(&self, ui: &mut Ui, icon: usize, on: bool, enabled: bool, tip: &str) -> bool {
+        let (rect, r) = ui.allocate_exact_size(vec2(32.0, 32.0), if enabled { Sense::click() } else { Sense::hover() });
+        let r = r.on_hover_text(tip);
+        let fill = if on { Color32::from_gray(205) } else if enabled && r.hovered() { Color32::from_gray(58) } else { Color32::TRANSPARENT };
+        let tint = if on { Color32::from_gray(24) } else if enabled { Color32::from_gray(205) } else { Color32::from_gray(88) };
+        ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+        match &self.rail_icons[icon] {
+            Some(t) => {
+                let size = vec2(t.aspect_ratio() * 17.0, 17.0);
+                let size = size * (20.0 / size.x).min(1.0);
+                ui.painter().image(t.id(), Rect::from_center_size(rect.center(), size), uv(), tint);
+            }
+            None => {
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, &tip[..2], FontId::proportional(11.0), tint);
+            }
+        }
+        enabled && r.clicked()
     }
 
     /// Selection by click with the usual modifiers.
@@ -184,8 +243,8 @@ impl App {
             let paths: Vec<String> = items.iter().map(|it| it.path.display().to_string()).collect();
             let off = items.iter().any(|it| it.look.is_none());
             let unstarred = items.iter().any(|it| !it.starred);
-            if self.mode != Mode::Loupe {
-                self.entry(ui, "Open in Loupe", "↩", Command::View(Mode::Loupe));
+            if self.mode != Mode::Detail {
+                self.entry(ui, "Open in Detail", "↩", Command::View(Mode::Detail));
             }
             #[cfg(target_os = "macos")]
             self.entry(ui, "Show in Finder", "⌘R", Command::ShowInFinder);
@@ -231,16 +290,19 @@ impl App {
         }
     }
 
-    /// The split's divider over a picture shown at `img`, dragged to move it, with each side
-    /// labelled when `named`.
+    /// The split's divider over a picture shown at `img`, dragged to move it and
+    /// double-clicked to centre it, with each side labelled when `named`.
     fn divider(&mut self, ui: &Ui, id: Id, img: Rect, named: bool) {
         if self.compare != Compare::Split {
             return;
         }
         let x = img.left() + self.split * img.width();
-        let r = ui.interact(Rect::from_x_y_ranges(x - 6.0..=x + 6.0, img.y_range()), egui::Id::new(("divider", id)), Sense::drag());
+        let r = ui.interact(Rect::from_x_y_ranges(x - 6.0..=x + 6.0, img.y_range()), egui::Id::new(("divider", id)), Sense::click_and_drag());
         if let Some(p) = r.interact_pointer_pos().filter(|_| r.dragged()) {
             self.split = ((p.x - img.left()) / img.width()).clamp(0.0, 1.0);
+        }
+        if r.double_clicked() {
+            self.split = 0.5;
         }
         if r.hovered() || r.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
@@ -271,17 +333,19 @@ impl App {
         p.rect_filled(cell, CornerRadius::same(4), fill);
         let name_h = if named { 22.0 } else { 0.0 };
         let body = Rect::from_min_max(cell.min, pos2(cell.max.x, cell.max.y - name_h));
-        let inner = body.shrink(cell.width().min(cell.height()) * 0.07);
+        let fill = self.fill && self.mode == Mode::Grid;
+        let inner = body.shrink(if fill { 4.0 } else { cell.width().min(cell.height()) * 0.07 });
         let item = self.lib.get(id).unwrap();
         match &item.status {
             Status::Ready => {
                 let b = px(inner, ppp);
-                // in the loupe the large picture of the focused photo goes first
+                // in Detail the large picture of the focused photo goes first
                 let rank = if focused && self.mode == Mode::Grid { 0 } else { rank_base };
-                let (tex, size) = self.tiers.thumb(item, [(b[2] - b[0]).max(1) as u32, (b[3] - b[1]).max(1) as u32], rank);
+                let (tex, size) = self.tiers.thumb(item, [(b[2] - b[0]).max(1) as u32, (b[3] - b[1]).max(1) as u32], fill, rank);
                 if let Some(t) = tex {
-                    let r = centred(inner, size[0], size[1], ppp);
-                    p.image(t, r, uv(), Color32::WHITE);
+                    let full = centred(inner, size[0], size[1], ppp);
+                    let shown = inner.intersect(full);
+                    p.image(t, shown, uv_within(shown, full), Color32::WHITE);
                 }
             }
             Status::Failed(_) => {
@@ -364,7 +428,7 @@ impl App {
                     self.clicked(ui, id, &r);
                     if r.double_clicked() {
                         self.lib.click(id);
-                        self.mode = Mode::Loupe;
+                        self.mode = Mode::Detail;
                         self.zoom = None;
                     }
                     let hovered = r.hovered();
@@ -424,7 +488,7 @@ impl App {
             }
             if r.double_clicked() {
                 self.lib.focus = Some(id);
-                self.mode = Mode::Loupe;
+                self.mode = Mode::Detail;
                 self.zoom = None;
             }
             self.photo_menu(&r, id);
@@ -434,15 +498,19 @@ impl App {
             }
             let inner = cell.shrink(8.0);
             let b = px(inner, ppp);
+            let (bw, bh) = ((b[2] - b[0]).max(1) as f32, (b[3] - b[1]).max(1) as f32);
             let (origin, (gw, gh), angle) = self.tiers.shown(item);
-            let z = ((b[2] - b[0]) as f32 / gw as f32).min((b[3] - b[1]) as f32 / gh as f32);
-            let (iw, ih) = (((gw as f32 * z).round() as u32).max(1), ((gh as f32 * z).round() as u32).max(1));
-            let img = centred(inner, iw, ih, ppp);
+            let (gw, gh) = (gw as f32, gh as f32);
+            let z = if self.fill { (bw / gw).max(bh / gh) } else { (bw / gw).min(bh / gh) };
+            let (iw, ih) = ((gw * z).round().clamp(1.0, bw), (gh * z).round().clamp(1.0, bh));
+            let img = centred(inner, iw as u32, ih as u32, ppp);
+            let (sw, sh) = (iw / z / gw, ih / z / gh);
             let focused = self.lib.focus == Some(id);
-            let canvas = Canvas { origin, scale: gw as f32 / iw as f32, source: self.split_source(iw), clip: self.clipping, angle };
-            let tex = self.tiers.canvas(item, canvas, [iw, ih], if focused { 0 } else { 1 }).or_else(|| self.tiers.thumb_tex(id));
-            if let Some(t) = tex {
+            let canvas = Canvas { origin: [origin[0] + gw * (1.0 - sw) / 2.0, origin[1] + gh * (1.0 - sh) / 2.0], scale: 1.0 / z, source: self.split_source(iw as u32), clip: self.clipping, angle };
+            if let Some(t) = self.tiers.canvas(item, canvas, [iw as u32, ih as u32], if focused { 0 } else { 1 }) {
                 ui.painter().image(t, img, uv(), Color32::WHITE);
+            } else if let Some(t) = self.tiers.thumb_tex(id) {
+                ui.painter().image(t, img, Rect::from_center_size(pos2(0.5, 0.5), vec2(sw, sh)), Color32::WHITE);
             }
             self.divider(ui, id, img, false);
             if focused && ids.len() > 1 {
@@ -451,10 +519,10 @@ impl App {
         }
     }
 
-    fn loupe(&mut self, ui: &mut Ui) {
+    fn detail(&mut self, ui: &mut Ui) {
         let ppp = ui.ctx().pixels_per_point();
         let rect = ui.max_rect();
-        let resp = ui.interact(rect, egui::Id::new("loupe"), Sense::click_and_drag());
+        let resp = ui.interact(rect, egui::Id::new("detail"), Sense::click_and_drag());
         let Some(id) = self.lib.focus else { return };
         self.photo_menu(&resp, id);
         if self.cropping.as_ref().is_some_and(|e| e.id == id) {

@@ -54,7 +54,7 @@ pub enum Compare {
 pub enum Mode {
     Grid,
     Survey,
-    Loupe,
+    Detail,
 }
 
 /// What a file dialog's paths are for.
@@ -123,21 +123,23 @@ pub struct App {
     mode: Mode,
     panel: bool,
     thumb_pt: f32,
+    /// Grid and Survey: photos fill their cells, cut to them, rather than fit inside.
+    fill: bool,
     compare: Compare,
     /// Split: the divider's place across the picture, from 0 to 1, and whether the photo
     /// itself is on the right.
     split: f32,
     split_swap: bool,
-    /// Pure white and pure black are marked in the survey and the loupe.
+    /// Pure white and pure black are marked in Survey and Detail.
     clipping: bool,
     /// A photo whose finished picture is being read back for the clipboard.
     copy_image: Option<(Id, Planner)>,
     clipboard: Option<Settings>,
     /// An edit to the looks is under way (a slider held): one undo step for all of it.
     edit_open: bool,
-    /// Loupe: None fits the photo; otherwise screen pixels per grid pixel.
+    /// Detail: None fits the photo; otherwise screen pixels per grid pixel.
     zoom: Option<f32>,
-    /// Loupe: the point of the photo at the middle of the view, as fractions.
+    /// Detail: the point of the photo at the middle of the view, as fractions.
     center: [f32; 2],
     scroll_to_focus: bool,
     grid_cols: usize,
@@ -156,9 +158,11 @@ pub struct App {
     exportable: (u64, usize),
     /// The mark on a photo with a look: the SF Symbol for film where there is one.
     film_mark: Option<egui::TextureHandle>,
+    /// The rail's icons: Edit, Crop and Reference.
+    rail_icons: [Option<egui::TextureHandle>; 3],
     presets: Vec<presets::Preset>,
     reference: reference::Reference,
-    /// A crop being drawn on the focused photo in the loupe.
+    /// A crop being drawn on the focused photo in Detail.
     cropping: Option<crop::CropEdit>,
     /// The name of a preset being made, while it is typed.
     new_preset: Option<String>,
@@ -196,6 +200,7 @@ impl App {
             mode: Mode::Grid,
             panel: true,
             thumb_pt: 168.0,
+            fill: false,
             compare: Compare::After,
             split: 0.5,
             split_swap: false,
@@ -223,8 +228,12 @@ impl App {
             film_mark: symbols::symbol("film", 28).map(|image| cc.egui_ctx.load_texture("film", image, egui::TextureOptions::LINEAR)),
             #[cfg(not(target_os = "macos"))]
             film_mark: None,
+            #[cfg(target_os = "macos")]
+            rail_icons: ["slider.horizontal.3", "crop.rotate", "pip"].map(|name| symbols::symbol(name, 40).map(|image| cc.egui_ctx.load_texture(name, image, egui::TextureOptions::LINEAR))),
+            #[cfg(not(target_os = "macos"))]
+            rail_icons: [None, None, None],
             presets: presets::load(),
-            reference: reference::Reference::default(),
+            reference: reference::Reference::new(),
             cropping: None,
             new_preset: None,
             preview_wanted: None,
@@ -232,7 +241,7 @@ impl App {
             menu: Some(menu::MenuBar::new(&cc.egui_ctx)),
             recent: Vec::new(),
             remember,
-            saved: ((0, Mode::Grid, 0, 0, [0, 0], [false, false]), std::time::Instant::now()),
+            saved: ((0, Mode::Grid, 0, 0, 0, [false; 3]), std::time::Instant::now()),
             dialog: None,
             waker: Waker::from(Arc::new(Repaint(cc.egui_ctx.clone()))),
         };
@@ -473,7 +482,7 @@ impl App {
     // ---------- keys ---------------------------------------------------------------------
 
     fn keys(&mut self, ctx: &egui::Context) {
-        // a dialog takes the keys: Return there means Export, not the loupe, and
+        // a dialog takes the keys: Return there means Export, not Detail, and
         // Delete must not take photos out of the library behind it
         if ctx.wants_keyboard_input() || self.export_form.is_some() || !self.export_errors.is_empty() {
             return;
@@ -525,8 +534,8 @@ impl App {
             (cmd, Key::Minus, Command::Zoom(false)),
             (none, Key::G, Command::View(Mode::Grid)),
             (none, Key::N, Command::View(Mode::Survey)),
-            (none, Key::E, Command::View(Mode::Loupe)),
-            (none, Key::Enter, Command::View(Mode::Loupe)),
+            (none, Key::E, Command::View(Mode::Detail)),
+            (none, Key::Enter, Command::View(Mode::Detail)),
             (none, Key::Tab, Command::Panel),
             (shift, Key::R, Command::Reference),
             (none, Key::Backslash, Command::Compare(Compare::Before)),
@@ -550,7 +559,7 @@ impl App {
             self.mode = Mode::Grid;
             self.scroll_to_focus = true;
         }
-        if k(none, Key::Z) && self.mode == Mode::Loupe {
+        if k(none, Key::Z) && self.mode == Mode::Detail {
             if self.zoom.is_some() {
                 self.zoom = None;
             } else {
@@ -571,7 +580,7 @@ impl App {
         }
         if moved {
             self.scroll_to_focus = true;
-            if self.mode == Mode::Loupe {
+            if self.mode == Mode::Detail {
                 self.zoom = None;
             }
         }
@@ -666,7 +675,7 @@ impl App {
         }
     }
 
-    // ---------- loupe zoom ----------------------------------------------------------------
+    // ---------- detail zoom ---------------------------------------------------------------
 
     fn current_zoom(&self) -> f32 {
         self.zoom.unwrap_or(self.last_fit)
@@ -762,8 +771,11 @@ impl eframe::App for App {
         self.keys(ctx);
         let actions = self.layout(ctx);
         self.tiers.set_preview(self.preview_wanted.take());
-        if self.cropping.as_ref().is_some_and(|e| self.lib.focus != Some(e.id) || self.mode != Mode::Loupe) {
+        if self.cropping.as_ref().is_some_and(|e| self.lib.focus != Some(e.id) || self.mode != Mode::Detail) {
             self.finish_crop();
+            if self.mode == Mode::Detail && self.can(&Command::Crop) {
+                self.start_crop();
+            }
         }
         #[cfg(target_os = "macos")]
         if let Some(mut menu) = menu {
