@@ -22,7 +22,12 @@ but not the app. The macOS bundle is made by the scripts in `macos/`.
 ## Working in it
 
 Open photos with Open… (⌘O), by dropping files or folders on the window, or by naming
-them on the command line. The library shows every photo; click to select, ⌘-click to add
+them on the command line. On macOS, Open from Photos… (⇧⌘O) shows the system's Photos
+picker, with the library's albums and search, and takes any number of photos. The picker
+hands each photo over in its original format for a moment only, so the app copies it to
+`~/Library/Caches/studio.alexander.app/Photos`, in a folder per photo. The same photo
+picked again lands in the same place and opens once. Exports of these copies go to
+Pictures unless another folder is chosen. The library shows every photo; click to select, ⌘-click to add
 or remove one, ⇧-click to select a run. The panel on the right edits the look of every
 selected photo at once. Original shows the photo as it is; Film applies the process.
 Moving a knob changes that knob on all selected photos and leaves their other knobs as
@@ -42,6 +47,7 @@ the zoom in the loupe.
 | Keys | Does |
 | --- | --- |
 | ⌘O | Open photos |
+| ⇧⌘O | Open from the Photos library (macOS) |
 | ⇧⌘E | Export the selected photos |
 | G / N / E or Return | Grid / Survey / Loupe |
 | Esc | Back to the grid |
@@ -154,8 +160,8 @@ and quit.
 - Files opened from the Finder with Open With, or dropped on the Dock icon, arrive as
   macOS open-document events, which the windowing library does not pass on. Drop them on
   the window or use Open… instead.
-- HEIC and camera raw files are read through `sips`, which ships with macOS. That path
-  has not been tested on a Mac yet; raw files come out as `sips` develops them.
+- HEIC and camera raw files are read through `sips`, which ships with macOS, as a PNG
+  that keeps the file's colour profile. Raw files come out as `sips` develops them.
 - JPEG exports carry no embedded ICC profile; untagged JPEG is read as sRGB by browsers
   and photo apps, which is what the values are. PNG exports carry the sRGB chunk.
 - There is no native menu bar; less frequent commands are in the panel's … menu.

@@ -26,6 +26,10 @@ impl App {
                 if ui.button("Open…").on_hover_text("⌘O").clicked() {
                     self.import_dialog();
                 }
+                #[cfg(target_os = "macos")]
+                if ui.button("Open from Photos…").on_hover_text("⇧⌘O").clicked() {
+                    self.photos_dialog();
+                }
                 if self.lib.is_empty() {
                     return;
                 }
@@ -96,9 +100,18 @@ impl App {
 
     pub(super) fn empty(&mut self, ui: &mut Ui) {
         let c = ui.max_rect().center();
-        if ui.put(Rect::from_center_size(c, vec2(168.0, 34.0)), Button::new(RichText::new("Open Photos…").size(14.0))).clicked() {
-            self.import_dialog();
-        }
+        let big = |text: &str| Button::new(RichText::new(text).size(14.0)).min_size(vec2(168.0, 34.0));
+        let row = Rect::from_center_size(c, vec2(if cfg!(target_os = "macos") { 346.0 } else { 168.0 }, 34.0));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(row).layout(Layout::left_to_right(Align::Center)), |ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            if ui.add(big("Open…")).clicked() {
+                self.import_dialog();
+            }
+            #[cfg(target_os = "macos")]
+            if ui.add(big("Open from Photos…")).clicked() {
+                self.photos_dialog();
+            }
+        });
         ui.painter().text(c + vec2(0.0, 36.0), Align2::CENTER_CENTER, "or drop photos and folders here", FontId::proportional(12.0), LABEL);
     }
 

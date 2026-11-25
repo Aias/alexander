@@ -2,6 +2,8 @@
 
 mod chrome;
 mod controls;
+#[cfg(target_os = "macos")]
+mod photos;
 mod shots;
 mod tiers;
 mod views;
@@ -35,6 +37,8 @@ pub enum Mode {
 /// What a file dialog's paths are for.
 enum Dialog {
     Open,
+    #[cfg(target_os = "macos")]
+    Photos,
     ExportFolder,
     SaveLook,
     LoadLook,
@@ -50,6 +54,11 @@ impl Wake for Repaint {
     fn wake(self: Arc<Self>) {
         self.0.request_repaint();
     }
+}
+
+/// Where photos picked from the Photos library are copied.
+fn photos_cache() -> PathBuf {
+    std::env::home_dir().unwrap_or_default().join("Library/Caches/studio.alexander.app/Photos")
 }
 
 fn paths(handles: impl IntoIterator<Item = rfd::FileHandle>) -> Vec<PathBuf> {
@@ -179,6 +188,11 @@ impl App {
         self.ask(Dialog::Open, async move { paths(d.pick_files().await.into_iter().flatten()) });
     }
 
+    #[cfg(target_os = "macos")]
+    fn photos_dialog(&mut self) {
+        self.ask(Dialog::Photos, photos::pick(photos_cache()));
+    }
+
     /// Open a file dialog unless one is already open. rfd begins it as a sheet on the window
     /// when the future is first polled, and the sheet returns at once, so the window's
     /// events go on arriving between frames. A dialog run to completion inside a frame would
@@ -200,6 +214,8 @@ impl App {
                 }
                 self.import(paths);
             }
+            #[cfg(target_os = "macos")]
+            Dialog::Photos => self.import(paths),
             Dialog::ExportFolder => {
                 if let (Some(d), Some(form)) = (paths.into_iter().next(), &mut self.export_form) {
                     form.dir_ok = d.is_dir();
@@ -425,6 +441,10 @@ impl App {
         if k(cmd, Key::Z) {
             self.lib.undo();
         }
+        #[cfg(target_os = "macos")]
+        if k(cmd_shift, Key::O) {
+            self.photos_dialog();
+        }
         if k(cmd, Key::O) {
             self.import_dialog();
         }
@@ -521,7 +541,13 @@ impl App {
         if self.exportable() == 0 || self.export_run.is_some() {
             return;
         }
-        let dir = self.last_dir.clone().or_else(|| self.lib.focus.and_then(|f| self.lib.get(f)).and_then(|it| it.path.parent().map(|p| p.to_path_buf()))).unwrap_or_default();
+        let dir = self
+            .last_dir
+            .clone()
+            .or_else(|| self.lib.focus.and_then(|f| self.lib.get(f)).and_then(|it| it.path.parent().map(|p| p.to_path_buf())))
+            .filter(|d| !d.starts_with(photos_cache()))
+            .or_else(|| std::env::home_dir().map(|h| h.join("Pictures")))
+            .unwrap_or_default();
         self.export_form = Some(ExportForm { dir_ok: dir.is_dir(), dir, format: Format::Jpeg, size: SizeChoice::Original, long: 3000 });
     }
 
