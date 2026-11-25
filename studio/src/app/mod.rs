@@ -17,8 +17,11 @@ use alexander_studio::plan::Planner;
 use alexander_studio::provenance::Record;
 use egui::{Key, Modifiers};
 use std::collections::{HashSet, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Poll, Wake, Waker};
 use tiers::Tiers;
 use workers::{Done, Job, Workers};
 
@@ -27,6 +30,30 @@ pub enum Mode {
     Grid,
     Survey,
     Loupe,
+}
+
+/// What a file dialog's paths are for.
+enum Dialog {
+    Open,
+    ExportFolder,
+    SaveLook,
+    LoadLook,
+}
+
+/// The paths a file dialog gives when it closes.
+type Paths = Pin<Box<dyn Future<Output = Vec<PathBuf>>>>;
+
+/// Asks for a frame when a file dialog finishes, so its paths are taken up at once.
+struct Repaint(egui::Context);
+
+impl Wake for Repaint {
+    fn wake(self: Arc<Self>) {
+        self.0.request_repaint();
+    }
+}
+
+fn paths(handles: impl IntoIterator<Item = rfd::FileHandle>) -> Vec<PathBuf> {
+    handles.into_iter().map(|h| h.path().to_path_buf()).collect()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -86,6 +113,9 @@ pub struct App {
     last_fit: f32,
     /// Library revision and the count of exportable selected photos at it.
     exportable: (u64, usize),
+    /// The file dialog open, if any, and the paths it gives when it closes.
+    dialog: Option<(Dialog, Paths)>,
+    waker: Waker,
 }
 
 impl App {
@@ -123,6 +153,8 @@ impl App {
             frame_times: VecDeque::new(),
             last_fit: 1.0,
             exportable: (u64::MAX, 0),
+            dialog: None,
+            waker: Waker::from(Arc::new(Repaint(cc.egui_ctx.clone()))),
         };
         if app.shots.is_none() && !paths.is_empty() {
             app.import(paths);
@@ -140,13 +172,56 @@ impl App {
     }
 
     fn import_dialog(&mut self) {
-        let mut d = rfd::FileDialog::new().add_filter("Photos", load::extensions());
+        let mut d = rfd::AsyncFileDialog::new().add_filter("Photos", load::extensions());
         if let Some(dir) = &self.last_dir {
             d = d.set_directory(dir);
         }
-        if let Some(files) = d.pick_files() {
-            self.last_dir = files.first().and_then(|f| f.parent().map(|p| p.to_path_buf()));
-            self.import(files);
+        self.ask(Dialog::Open, async move { paths(d.pick_files().await.into_iter().flatten()) });
+    }
+
+    /// Open a file dialog unless one is already open. rfd begins it as a sheet on the window
+    /// when the future is first polled, and the sheet returns at once, so the window's
+    /// events go on arriving between frames. A dialog run to completion inside a frame would
+    /// deliver them inside that frame, and winit aborts when that happens.
+    fn ask(&mut self, dialog: Dialog, paths: impl Future<Output = Vec<PathBuf>> + 'static) {
+        if self.dialog.is_none() {
+            self.dialog = Some((dialog, Box::pin(paths)));
+        }
+    }
+
+    fn poll_dialog(&mut self) {
+        let Some((_, future)) = &mut self.dialog else { return };
+        let Poll::Ready(paths) = future.as_mut().poll(&mut std::task::Context::from_waker(&self.waker)) else { return };
+        let Some((dialog, _)) = self.dialog.take() else { return };
+        match dialog {
+            Dialog::Open => {
+                if let Some(dir) = paths.first().and_then(|f| f.parent()) {
+                    self.last_dir = Some(dir.to_path_buf());
+                }
+                self.import(paths);
+            }
+            Dialog::ExportFolder => {
+                if let (Some(d), Some(form)) = (paths.into_iter().next(), &mut self.export_form) {
+                    form.dir_ok = d.is_dir();
+                    form.dir = d;
+                }
+            }
+            Dialog::SaveLook => {
+                let Some(look) = self.focus_look().cloned() else { return };
+                for p in paths {
+                    if let Err(e) = std::fs::write(&p, serde_json::to_string_pretty(&look).unwrap_or_default()) {
+                        self.export_errors.push(format!("{}: {e}", p.display()));
+                    }
+                }
+            }
+            Dialog::LoadLook => {
+                for p in paths {
+                    match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<Settings>(&t).map_err(|e| e.to_string())) {
+                        Ok(l) => self.set_looks(Some(l)),
+                        Err(e) => self.export_errors.push(format!("{}: {e}", p.display())),
+                    }
+                }
+            }
         }
     }
 
@@ -269,21 +344,16 @@ impl App {
     }
 
     fn save_look(&mut self) {
-        let Some(l) = self.focus_look().cloned() else { return };
-        if let Some(p) = rfd::FileDialog::new().add_filter("Look", &["json"]).set_file_name("look.json").save_file() {
-            if let Err(e) = std::fs::write(&p, serde_json::to_string_pretty(&l).unwrap_or_default()) {
-                self.export_errors.push(format!("{}: {e}", p.display()));
-            }
+        if self.focus_look().is_none() {
+            return;
         }
+        let d = rfd::AsyncFileDialog::new().add_filter("Look", &["json"]).set_file_name("look.json");
+        self.ask(Dialog::SaveLook, async move { paths(d.save_file().await) });
     }
 
     fn load_look(&mut self) {
-        if let Some(p) = rfd::FileDialog::new().add_filter("Look", &["json"]).pick_file() {
-            match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<Settings>(&t).map_err(|e| e.to_string())) {
-                Ok(l) => self.set_looks(Some(l)),
-                Err(e) => self.export_errors.push(format!("{}: {e}", p.display())),
-            }
-        }
+        let d = rfd::AsyncFileDialog::new().add_filter("Look", &["json"]);
+        self.ask(Dialog::LoadLook, async move { paths(d.pick_file().await) });
     }
 
     fn do_action(&mut self, ctx: &egui::Context, a: controls::Action) {
@@ -561,6 +631,7 @@ impl eframe::App for App {
         for a in actions {
             self.do_action(ctx, a);
         }
+        self.poll_dialog();
         self.export_step();
         let (loads, pending) = self.tiers.process(&self.lib, self.before);
         self.pending = pending;
