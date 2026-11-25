@@ -6,9 +6,9 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleName</key>
-	<string>Alexander Studio</string>
+	<string>Alexander</string>
 	<key>CFBundleDisplayName</key>
-	<string>Alexander Studio</string>
+	<string>Alexander</string>
 	<key>CFBundleIdentifier</key>
 	<string>studio.alexander.app</string>
 	<key>CFBundleExecutable</key>

@@ -62,9 +62,9 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 The research behind every stage, its sources and the decisions taken are written up in
 [docs/RESEARCH.md](docs/RESEARCH.md).
 
-## Studio
+## Desktop app
 
-`studio/` holds Alexander Studio, a desktop app that runs the same simulation live on the GPU
+`studio/` holds Alexander, a desktop app that runs the same simulation live on the GPU
 over a library of photos; see [studio/README.md](studio/README.md).
 
 ## What each stage does
