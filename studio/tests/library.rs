@@ -180,6 +180,25 @@ fn removal_is_undone_in_place() {
 }
 
 #[test]
+fn the_starred_filter_shows_and_walks_only_starred_photos() {
+    let (mut l, id) = lib(4);
+    l.toggle_starred(&[id[1], id[3]]);
+    l.click(id[0]);
+    l.set_starred_only(true);
+    assert_eq!(l.shown(), &[id[1], id[3]]);
+    assert!(l.selected().is_empty());
+    l.step(1, false);
+    assert_eq!(sel(&l), vec![id[1]]);
+    l.step(1, false);
+    assert_eq!(sel(&l), vec![id[3]]);
+    l.select_all();
+    assert_eq!(sel(&l), vec![id[1], id[3]]);
+    l.toggle_starred(&[id[3]]);
+    assert_eq!(l.shown(), &[id[1]]);
+    assert_eq!(sel(&l), vec![id[1]]);
+}
+
+#[test]
 fn an_export_opens_as_its_original_with_its_look() {
     let dir = std::env::temp_dir().join(format!("studio-roundtrip-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

@@ -51,6 +51,7 @@ pub struct Item {
     pub stash: Option<Settings>,
     /// Bumped whenever `look` changes, so renders can tell they are stale without comparing settings.
     pub gen: u64,
+    pub starred: bool,
 }
 
 impl Item {
@@ -117,6 +118,10 @@ pub struct Library {
     selected: BTreeSet<Id>,
     pub focus: Option<Id>,
     anchor: Option<Id>,
+    starred_only: bool,
+    /// The photos the views show, in library order: every photo, or only the starred ones.
+    shown: Vec<Id>,
+    shown_index: HashMap<Id, usize>,
     undo: Vec<Step>,
     redo: Vec<Step>,
 }
@@ -186,7 +191,11 @@ impl Library {
         self.rev += 1;
         self.by_path.insert(path.clone(), id);
         self.index.insert(id, self.items.len());
-        self.items.push(Item { id, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, frame: None, look: None, stash: None, gen: 0 });
+        self.items.push(Item { id, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, frame: None, look: None, stash: None, gen: 0, starred: false });
+        if !self.starred_only {
+            self.shown_index.insert(id, self.shown.len());
+            self.shown.push(id);
+        }
         Some(id)
     }
 
@@ -205,7 +214,7 @@ impl Library {
         if ids.is_empty() {
             return Vec::new();
         }
-        let first = ids.iter().filter_map(|id| self.position(*id)).min();
+        let first = ids.iter().filter_map(|id| self.shown_position(*id)).min();
         self.rev += 1;
         let mut taken = Vec::new();
         for (i, mut it) in std::mem::take(&mut self.items).into_iter().enumerate() {
@@ -224,8 +233,7 @@ impl Library {
             self.focus = None;
             if self.selected.is_empty() {
                 if let Some(i) = first {
-                    if !self.items.is_empty() {
-                        let id = self.items[i.min(self.items.len() - 1)].id;
+                    if let Some(&id) = self.shown.get(i.min(self.shown.len().saturating_sub(1))) {
                         self.selected.insert(id);
                         self.focus = Some(id);
                     }
@@ -252,10 +260,57 @@ impl Library {
         self.reindex();
         self.focus = self.selected.iter().next().copied();
         self.anchor = self.focus;
+        self.drop_hidden();
     }
 
     fn reindex(&mut self) {
         self.index = self.items.iter().enumerate().map(|(i, it)| (it.id, i)).collect();
+        self.shown = self.items.iter().filter(|it| it.starred || !self.starred_only).map(|it| it.id).collect();
+        self.shown_index = self.shown.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+    }
+
+    /// Take the photos the views do not show out of the selection, the focus and the anchor.
+    fn drop_hidden(&mut self) {
+        self.selected.retain(|id| self.shown_index.contains_key(id));
+        if self.focus.is_some_and(|f| !self.shown_index.contains_key(&f)) {
+            self.focus = self.selected.iter().next().copied();
+        }
+        if self.anchor.is_some_and(|a| !self.shown_index.contains_key(&a)) {
+            self.anchor = self.focus;
+        }
+    }
+
+    /// The photos the views show, in library order.
+    pub fn shown(&self) -> &[Id] {
+        &self.shown
+    }
+
+    pub fn shown_position(&self, id: Id) -> Option<usize> {
+        self.shown_index.get(&id).copied()
+    }
+
+    pub fn starred_only(&self) -> bool {
+        self.starred_only
+    }
+
+    /// Show only the starred photos, or every photo. Photos hidden leave the selection.
+    pub fn set_starred_only(&mut self, on: bool) {
+        self.rev += 1;
+        self.starred_only = on;
+        self.reindex();
+        self.drop_hidden();
+    }
+
+    /// Star the photos, or take their stars away when every one of them has a star.
+    pub fn toggle_starred(&mut self, ids: &[Id]) {
+        let on = ids.iter().any(|&id| self.get(id).is_some_and(|it| !it.starred));
+        for &id in ids {
+            if let Some(it) = self.get_mut(id) {
+                it.starred = on;
+            }
+        }
+        self.reindex();
+        self.drop_hidden();
     }
 
     // ---------- selection ----------------------------------------------------------------
@@ -292,18 +347,18 @@ impl Library {
     /// Shift-click: everything from the anchor to this photo.
     pub fn extend(&mut self, id: Id) {
         self.rev += 1;
-        let Some(to) = self.position(id) else { return };
-        let from = self.anchor.and_then(|a| self.position(a)).unwrap_or(to);
+        let Some(to) = self.shown_position(id) else { return };
+        let from = self.anchor.and_then(|a| self.shown_position(a)).unwrap_or(to);
         let (a, b) = (from.min(to), from.max(to));
-        self.selected = self.items[a..=b].iter().map(|it| it.id).collect();
+        self.selected = self.shown[a..=b].iter().copied().collect();
         self.focus = Some(id);
     }
 
     pub fn select_all(&mut self) {
         self.rev += 1;
-        self.selected = self.items.iter().map(|it| it.id).collect();
+        self.selected = self.shown.iter().copied().collect();
         if self.focus.is_none() {
-            self.focus = self.items.first().map(|it| it.id);
+            self.focus = self.shown.first().copied();
             self.anchor = self.focus;
         }
     }
@@ -317,18 +372,18 @@ impl Library {
         self.selected.range(id..).next().or_else(|| self.selected.range(..id).next_back()).copied()
     }
 
-    /// Move the focus `delta` places through the library. With `extend` the selection
+    /// Move the focus `delta` places through the photos shown. With `extend` the selection
     /// grows from the anchor as with shift-click; otherwise the new photo is selected alone.
     pub fn step(&mut self, delta: isize, extend: bool) {
-        if self.items.is_empty() {
+        if self.shown.is_empty() {
             return;
         }
-        let cur = self.focus.and_then(|f| self.position(f));
+        let cur = self.focus.and_then(|f| self.shown_position(f));
         let next = match cur {
             None => 0,
-            Some(i) => (i as isize + delta).clamp(0, self.items.len() as isize - 1) as usize,
+            Some(i) => (i as isize + delta).clamp(0, self.shown.len() as isize - 1) as usize,
         };
-        let id = self.items[next].id;
+        let id = self.shown[next];
         if extend {
             if self.anchor.is_none() {
                 self.anchor = self.focus.or(Some(id));

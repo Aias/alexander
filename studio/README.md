@@ -44,6 +44,11 @@ have a filmstrip. The bar under the view counts the photos and the selection, na
 focused photo, holds the compare switches, and holds the thumbnail size in the grid and
 the zoom in the loupe.
 
+A star marks the photos worth keeping. It shows in the corner of a starred photo's cell,
+and under the pointer in the corner of any other, where a click stars that photo alone.
+★ at the left of the bar shows only the starred photos; the arrow keys, ⇧-click and
+Select All then go through those alone. Opening photos shows every photo again.
+
 Before (`\`) shows the photo itself in place of its render. Split (Y) shows both, in
 Survey and Loupe, with the photo itself left of a divider and the render right of it. Drag
 the divider to move it, and press Swap to put the photo itself on the right. Moving the
@@ -67,6 +72,7 @@ of its simulation grid, cut to the picture inside its border when the look strip
 | ⌘A / ⌘D | Select all / none |
 | Delete or Backspace | Remove from the library (the file stays on disk; ⌘Z puts it back) |
 | V | Switch the process on or off for the selection |
+| S | Star the selection, or take its stars away |
 | \\ | Before |
 | Y | Split before and after |
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |

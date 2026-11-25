@@ -191,6 +191,7 @@ impl App {
             let paths: Vec<_> = ids.iter().filter_map(|&i| self.lib.get(i)).map(|it| it.path.clone()).collect();
             let looked = self.lib.get(id).is_some_and(|it| it.look.is_some());
             let off = ids.iter().any(|&i| self.lib.get(i).is_some_and(|it| it.look.is_none()));
+            let unstarred = ids.iter().any(|&i| self.lib.get(i).is_some_and(|it| !it.starred));
             if item(ui, "Open in Loupe", "↩", self.mode != Mode::Loupe) {
                 self.mode = Mode::Loupe;
                 self.zoom = None;
@@ -208,6 +209,9 @@ impl App {
                 self.copy_image = Some((id, Planner::new()));
             }
             ui.separator();
+            if item(ui, if unstarred { "Star" } else { "Remove Star" }, "S", true) {
+                self.lib.toggle_starred(&ids.iter().copied().collect::<Vec<_>>());
+            }
             if item(ui, if off { "Turn Film On" } else { "Turn Film Off" }, "V", true) {
                 self.do_action(&ctx, controls::Action::Process(None));
             }
@@ -320,6 +324,23 @@ impl App {
         if focused && selected {
             ui.painter().rect_stroke(cell, CornerRadius::same(4), Stroke::new(1.0f32, FOCUS_LINE), StrokeKind::Inside);
         }
+        self.star(ui, id, cell);
+    }
+
+    /// A photo's star in the corner of its cell: shown when it has one, and offered under
+    /// the pointer when it has none. Clicking it stars this photo alone, or takes its star away.
+    fn star(&mut self, ui: &Ui, id: Id, cell: Rect) {
+        let starred = self.lib.get(id).is_some_and(|it| it.starred);
+        if !starred && !ui.rect_contains_pointer(cell) {
+            return;
+        }
+        let at = Rect::from_center_size(cell.min + vec2(12.0, 12.0), vec2(18.0, 18.0));
+        let r = ui.interact(at, egui::Id::new(("star", id)), Sense::click()).on_hover_text("S");
+        let colour = if starred || r.hovered() { Color32::WHITE } else { LABEL };
+        ui.painter().text(at.center(), Align2::CENTER_CENTER, if starred { "★" } else { "☆" }, FontId::proportional(13.0), colour);
+        if r.clicked() {
+            self.lib.toggle_starred(&[id]);
+        }
     }
 
     fn grid(&mut self, ui: &mut Ui) {
@@ -331,11 +352,11 @@ impl App {
         self.grid_cols = cols;
         let w = (avail - gap * (cols - 1) as f32) / cols as f32;
         let row_h = w;
-        let n = self.lib.len();
+        let n = self.lib.shown().len();
         let rows = n.div_ceil(cols);
         let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
         if self.scroll_to_focus {
-            if let Some(i) = self.lib.focus.and_then(|f| self.lib.position(f)) {
+            if let Some(i) = self.lib.focus.and_then(|f| self.lib.shown_position(f)) {
                 let row = i / cols;
                 let (a, b) = self.grid_rows_seen;
                 let step = row_h + gap;
@@ -355,7 +376,7 @@ impl App {
                     if i >= n {
                         break;
                     }
-                    let id = self.lib.at(i).id;
+                    let id = self.lib.shown()[i];
                     let x = rect.min.x + gap + c as f32 * (w + gap);
                     let cell = Rect::from_min_size(pos2(x, rect.min.y), vec2(w, row_h));
                     let r = ui.interact(cell, egui::Id::new(("cell", id)), Sense::click());
@@ -525,13 +546,14 @@ impl App {
         }
         let shown = from_px([x0, y0, x1, y1], ppp);
         let canvas = Canvas { origin: [origin[0] + c[0] + (x0 as f32 - vc[0]) / z, origin[1] + c[1] + (y0 as f32 - vc[1]) / z], scale: 1.0 / z, source: self.split_source((x1 - x0) as u32) };
-        let pos = self.lib.position(item.id).unwrap_or(0);
-        for j in [pos + 1, pos.wrapping_sub(1)] {
-            if j < self.lib.len() {
-                self.tiers.prefetch(self.lib.at(j));
+        if let Some(pos) = self.lib.shown_position(id) {
+            for j in [pos + 1, pos.wrapping_sub(1)] {
+                if let Some(next) = self.lib.shown().get(j).and_then(|&n| self.lib.get(n)) {
+                    self.tiers.prefetch(next);
+                }
             }
         }
-        let item = self.lib.at(pos);
+        let Some(item) = self.lib.get(id) else { return };
         if let Some(t) = self.tiers.canvas(item, canvas, [(x1 - x0) as u32, (y1 - y0) as u32], 0) {
             ui.painter().image(t, shown, uv(), Color32::WHITE);
         } else if let Some(t) = self.tiers.thumb_tex(item.id) {
@@ -547,8 +569,8 @@ impl App {
         let h = ui.available_height();
         let gap = 6.0;
         let cell = vec2((h - 2.0 * gap) * 1.25, h - 2.0 * gap);
-        let n = self.lib.len();
-        let scroll_to = if self.scroll_to_focus { self.lib.focus.and_then(|f| self.lib.position(f)) } else { None };
+        let n = self.lib.shown().len();
+        let scroll_to = if self.scroll_to_focus { self.lib.focus.and_then(|f| self.lib.shown_position(f)) } else { None };
         self.scroll_to_focus = false;
         egui::ScrollArea::horizontal().auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show_viewport(ui, |ui, viewport| {
             let origin = ui.max_rect().min;
@@ -561,7 +583,7 @@ impl App {
                 ui.scroll_to_rect(r, Some(egui::Align::Center));
             }
             for i in first..last {
-                let id = self.lib.at(i).id;
+                let id = self.lib.shown()[i];
                 let r = Rect::from_min_size(origin + vec2(gap + i as f32 * (cell.x + gap), gap), cell);
                 let resp = ui.interact(r, egui::Id::new(("strip", id)), Sense::click());
                 self.clicked(ui, id, &resp);

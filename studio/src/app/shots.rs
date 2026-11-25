@@ -72,6 +72,7 @@ impl Shots {
                     app.lib.toggle(id);
                 }
                 app.lib.focus = Some(ids[0]);
+                app.lib.toggle_starred(&[ids[0], ids[2]]);
                 let processed: Vec<u64> = ids.iter().take(3).copied().collect();
                 app.lib.set_look(&processed, Some(Settings::default()));
                 app.mode = Mode::Grid;

@@ -88,11 +88,18 @@ impl App {
                 }
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                if self.opening > 0 {
+                let mut starred_only = self.lib.starred_only();
+                if ui.toggle_value(&mut starred_only, "★").on_hover_text("Starred photos only").clicked() {
+                    self.lib.set_starred_only(starred_only);
+                }
+                if self.opening > 0 || self.copy_image.is_some() {
                     ui.add(egui::Spinner::new().size(12.0).color(LABEL));
                 }
                 let n = self.lib.len();
                 let mut info = format!("{n} {}", if n == 1 { "photo" } else { "photos" });
+                if starred_only {
+                    info = format!("{} of {info}", self.lib.shown().len());
+                }
                 let k = self.lib.selected().len();
                 if k > 0 {
                     info += &format!(" / {k} selected");

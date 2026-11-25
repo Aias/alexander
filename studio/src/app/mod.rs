@@ -266,6 +266,9 @@ impl App {
             match done {
                 Done::Collected(paths) => {
                     self.opening -= 1;
+                    if self.lib.starred_only() {
+                        self.lib.set_starred_only(false);
+                    }
                     let mut first = None;
                     for p in paths {
                         if let Some(id) = self.lib.add(p.clone()) {
@@ -533,6 +536,10 @@ impl App {
         }
         if k(none, Key::Y) {
             self.toggle_compare(Compare::Split);
+        }
+        if k(none, Key::S) {
+            let ids = self.lib.selection();
+            self.lib.toggle_starred(&ids);
         }
         if k(none, Key::V) && !self.lib.selected().is_empty() {
             self.do_action(ctx, controls::Action::Process(None));
