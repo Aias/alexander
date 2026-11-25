@@ -1,7 +1,7 @@
 //! The window's chrome: the toolbar, the status bar under the view, and the dialogs.
 
 use super::views::{segmented, LABEL};
-use super::{controls, paths, App, Compare, Dialog, Mode, SizeChoice};
+use super::{controls, paths, App, Command, Compare, Dialog, Mode, SizeChoice};
 use alexander_studio::export::Format;
 use egui::{vec2, Align, Align2, Button, FontId, Key, Layout, Margin, Rect, RichText, Ui};
 
@@ -69,29 +69,21 @@ impl App {
                     if self.zoom != Some(1.0) {
                         ui.label(RichText::new(format!("{:.0}%", self.current_zoom() * 100.0)).color(LABEL));
                     }
-                    if ui.selectable_label(self.zoom == Some(1.0), "100%").on_hover_text("⌘1").clicked() {
-                        self.zoom_100();
-                    }
-                    if ui.selectable_label(self.zoom.is_none(), "Fit").on_hover_text("⌘0").clicked() {
-                        self.zoom = None;
-                    }
+                    self.switch(ui, self.zoom == Some(1.0), "100%", "⌘1", Command::Actual);
+                    self.switch(ui, self.zoom.is_none(), "Fit", "⌘0", Command::Fit);
                 }
                 Mode::Survey => {}
             }
             ui.add_space(8.0);
-            if self.compare == Compare::Split && ui.selectable_label(self.split_swap, "Swap").clicked() {
-                self.split_swap = !self.split_swap;
+            if self.compare == Compare::Split {
+                self.switch(ui, self.split_swap, "Swap", "", Command::Swap);
             }
             for (c, label, keys) in [(Compare::Split, "Split", "Y"), (Compare::Before, "Before", "\\")] {
-                if ui.selectable_label(self.compare == c, label).on_hover_text(keys).clicked() {
-                    self.toggle_compare(c);
-                }
+                self.switch(ui, self.compare == c, label, keys, Command::Compare(c));
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                let mut starred_only = self.lib.starred_only();
-                if ui.toggle_value(&mut starred_only, "★").on_hover_text("Starred photos only").clicked() {
-                    self.lib.set_starred_only(starred_only);
-                }
+                let starred_only = self.lib.starred_only();
+                self.switch(ui, starred_only, "★", "Starred photos only", Command::StarredOnly);
                 if self.opening > 0 || self.copy_image.is_some() {
                     ui.add(egui::Spinner::new().size(12.0).color(LABEL));
                 }
@@ -110,6 +102,15 @@ impl App {
                 ui.add(egui::Label::new(RichText::new(info).color(LABEL)).truncate());
             });
         });
+    }
+
+    /// A switch in a bar, lit when `on`, that runs `c` when clicked.
+    fn switch(&mut self, ui: &mut Ui, on: bool, label: &str, tip: &str, c: Command) {
+        let r = ui.selectable_label(on, label);
+        let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
+        if r.clicked() {
+            self.run(&ui.ctx().clone(), c);
+        }
     }
 
     pub(super) fn empty(&mut self, ui: &mut Ui) {

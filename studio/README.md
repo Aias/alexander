@@ -77,6 +77,10 @@ library. As in the Finder, a photo outside the selection becomes the selection f
 the commands act on every photo selected. Copy Image copies the photo clicked at the size
 of its simulation grid, cut to the picture inside its border when the look strips it.
 
+On macOS the menu bar holds every command with its key: File (with Open Recent, the
+folders photos were opened from lately), Edit, Photo, View and Window. Keys with ⌘ go to
+the menu; plain keys go to the window, which leaves them to text being typed.
+
 | Keys | Does |
 | --- | --- |
 | ⌘O | Open photos |
@@ -90,6 +94,7 @@ of its simulation grid, cut to the picture inside its border when the look strip
 | V | Switch the process on or off for the selection |
 | S | Star the selection, or take its stars away |
 | ⌘' | Make a virtual copy of each selected photo |
+| ⌘R | Show the selected photos in the Finder |
 | \\ | Before |
 | Y | Split before and after |
 | J | Mark clipped highlights red and clipped shadows blue |
@@ -210,7 +215,6 @@ and quit.
   that keeps the file's colour profile. Raw files come out as `sips` develops them.
 - JPEG exports carry no embedded ICC profile; untagged JPEG is read as sRGB by browsers
   and photo apps, which is what the values are. PNG exports carry the sRGB chunk.
-- There is no native menu bar; less frequent commands are in the panel's … menu.
 - Exporting reads each finished picture back from the GPU on the interface thread, so the
   window pauses for a moment per photo while an export runs.
 - Speed has been measured only on a software GPU, where absolute numbers mean little.

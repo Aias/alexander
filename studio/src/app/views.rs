@@ -1,9 +1,8 @@
 //! Laying out the window: the three views, the filmstrip and where the panels go.
 
-use super::{controls, App, Compare, Mode};
+use super::{App, Command, Compare, Mode};
 use alexander_studio::engine::Canvas;
-use alexander_studio::library::{Id, Status};
-use alexander_studio::plan::Planner;
+use alexander_studio::library::{Id, Item, Status};
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{pos2, vec2, Align2, Button, Color32, CornerRadius, CursorIcon, FontId, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 
@@ -116,7 +115,7 @@ fn centred(area: Rect, w: u32, h: u32, ppp: f32) -> Rect {
 }
 
 impl App {
-    pub(super) fn layout(&mut self, ctx: &egui::Context) -> Vec<controls::Action> {
+    pub(super) fn layout(&mut self, ctx: &egui::Context) -> Vec<Command> {
         let mut actions = Vec::new();
         self.toolbar(ctx);
         let has_photos = !self.lib.is_empty();
@@ -179,64 +178,42 @@ impl App {
         }
         r.context_menu(|ui| {
             ui.set_min_width(230.0);
-            let item = |ui: &mut Ui, text: &str, keys: &str, enabled: bool| {
-                let clicked = ui.add_enabled(enabled, Button::new(text).shortcut_text(keys)).clicked();
-                if clicked {
-                    ui.close_menu();
-                }
-                clicked
-            };
-            let ctx = ui.ctx().clone();
-            let ids = self.lib.selected().clone();
-            let paths: Vec<_> = ids.iter().filter_map(|&i| self.lib.get(i)).map(|it| it.path.clone()).collect();
-            let looked = self.lib.get(id).is_some_and(|it| it.look.is_some());
-            let off = ids.iter().any(|&i| self.lib.get(i).is_some_and(|it| it.look.is_none()));
-            let unstarred = ids.iter().any(|&i| self.lib.get(i).is_some_and(|it| !it.starred));
-            if item(ui, "Open in Loupe", "↩", self.mode != Mode::Loupe) {
-                self.mode = Mode::Loupe;
-                self.zoom = None;
+            let ids = self.lib.selection();
+            let items: Vec<&Item> = ids.iter().filter_map(|&i| self.lib.get(i)).collect();
+            let paths: Vec<String> = items.iter().map(|it| it.path.display().to_string()).collect();
+            let off = items.iter().any(|it| it.look.is_none());
+            let unstarred = items.iter().any(|it| !it.starred);
+            if self.mode != Mode::Loupe {
+                self.entry(ui, "Open in Loupe", "↩", Command::View(Mode::Loupe));
             }
             #[cfg(target_os = "macos")]
-            if item(ui, "Show in Finder", "", true) {
-                let paths = paths.clone();
-                std::thread::spawn(move || std::process::Command::new("/usr/bin/open").arg("-R").args(paths).status());
+            self.entry(ui, "Show in Finder", "⌘R", Command::ShowInFinder);
+            if ui.button(if paths.len() > 1 { "Copy File Paths" } else { "Copy File Path" }).clicked() {
+                ui.ctx().copy_text(paths.join("\n"));
+                ui.close_menu();
             }
-            if item(ui, if paths.len() > 1 { "Copy File Paths" } else { "Copy File Path" }, "", true) {
-                ctx.copy_text(paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"));
-            }
-            let ready = self.lib.get(id).is_some_and(|it| it.ready());
-            if item(ui, "Copy Image", "", ready && looked && self.copy_image.is_none()) {
-                self.copy_image = Some((id, Planner::new()));
-            }
-            if item(ui, "Create Virtual Copy", "⌘'", ready) {
-                self.lib.duplicate(&self.lib.selection());
-            }
+            self.entry(ui, "Copy Image", "", Command::CopyImage);
+            self.entry(ui, "Create Virtual Copy", "⌘'", Command::VirtualCopy);
             ui.separator();
-            if item(ui, if unstarred { "Star" } else { "Remove Star" }, "S", true) {
-                self.lib.toggle_starred(&ids.iter().copied().collect::<Vec<_>>());
-            }
-            if item(ui, if off { "Turn Film On" } else { "Turn Film Off" }, "V", true) {
-                self.do_action(&ctx, controls::Action::Process(None));
-            }
-            if item(ui, "Copy Look", "⇧⌘C", looked) {
-                self.do_action(&ctx, controls::Action::CopyLook);
-            }
-            if item(ui, "Paste Look", "⇧⌘V", self.clipboard.is_some()) {
-                self.do_action(&ctx, controls::Action::PasteLook);
-            }
-            if item(ui, "Reset Look", "⇧⌘R", looked) {
-                self.do_action(&ctx, controls::Action::Reset);
-            }
+            self.entry(ui, if unstarred { "Star" } else { "Remove Star" }, "S", Command::Star);
+            self.entry(ui, if off { "Turn Film On" } else { "Turn Film Off" }, "V", Command::Process(None));
+            self.entry(ui, "Copy Look", "⇧⌘C", Command::CopyLook);
+            self.entry(ui, "Paste Look", "⇧⌘V", Command::PasteLook);
+            self.entry(ui, "Reset Look", "⇧⌘R", Command::ResetLook);
             ui.separator();
-            if item(ui, "Export…", "⇧⌘E", self.exportable() > 0 && self.export_run.is_none()) {
-                self.open_export();
-            }
+            self.entry(ui, "Export…", "⇧⌘E", Command::Export);
             ui.separator();
             let remove = if ids.len() > 1 { format!("Remove {} Photos from Library", ids.len()) } else { "Remove from Library".to_string() };
-            if item(ui, &remove, "⌫", true) {
-                self.forget(&ids);
-            }
+            self.entry(ui, &remove, "⌫", Command::Remove);
         });
+    }
+
+    /// A menu entry that runs `c`, enabled when it can run.
+    pub(super) fn entry(&mut self, ui: &mut Ui, text: &str, keys: &str, c: Command) {
+        if ui.add_enabled(self.can(&c), Button::new(text).shortcut_text(keys)).clicked() {
+            ui.close_menu();
+            self.run(&ui.ctx().clone(), c);
+        }
     }
 
     /// The canvas columns that show the photo itself in a split, for a canvas `w` pixels

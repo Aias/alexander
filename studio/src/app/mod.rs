@@ -1,7 +1,10 @@
 //! The studio window: library, views, controls, import and export.
 
 mod chrome;
+mod commands;
 mod controls;
+#[cfg(target_os = "macos")]
+mod menu;
 #[cfg(target_os = "macos")]
 mod photos;
 mod presets;
@@ -26,6 +29,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Poll, Wake, Waker};
+use commands::Command;
 use tiers::Tiers;
 use workers::{Done, Job, Workers};
 
@@ -148,6 +152,8 @@ pub struct App {
     new_preset: Option<String>,
     /// The preset under the pointer this frame, to show on the focused photo.
     preview_wanted: Option<(Id, Settings)>,
+    #[cfg(target_os = "macos")]
+    menu: Option<menu::MenuBar>,
     /// Folders photos were opened from, latest first, for Open Recent.
     recent: Vec<PathBuf>,
     /// Whether the session is remembered: not in a scripted run, which starts afresh.
@@ -202,6 +208,8 @@ impl App {
             presets: presets::load(),
             new_preset: None,
             preview_wanted: None,
+            #[cfg(target_os = "macos")]
+            menu: Some(menu::MenuBar::new(&cc.egui_ctx)),
             recent: Vec::new(),
             remember,
             saved: ((0, Mode::Grid, 0, 0), std::time::Instant::now()),
@@ -436,34 +444,6 @@ impl App {
         self.ask(Dialog::LoadLook, async move { paths(d.pick_file().await) });
     }
 
-    fn do_action(&mut self, ctx: &egui::Context, a: controls::Action) {
-        use controls::Action;
-        match a {
-            Action::Process(on) => {
-                let ids = self.lib.selection();
-                self.lib.checkpoint(&ids);
-                match on {
-                    Some(on) => self.lib.set_process(&ids, on),
-                    None => self.lib.toggle_process(&ids),
-                }
-            }
-            Action::CopyLook => self.copy_look(ctx),
-            Action::PasteLook => self.paste_look(None),
-            Action::Reset => {
-                let ids = self.lib.selection();
-                self.lib.checkpoint(&ids);
-                self.lib.reset_looks(&ids);
-            }
-            Action::SaveLook => self.save_look(),
-            Action::LoadLook => self.load_look(),
-            Action::CopyFlags => {
-                if let Some(l) = self.focus_look() {
-                    ctx.copy_text(l.cli_flags());
-                }
-            }
-        }
-    }
-
     // ---------- keys ---------------------------------------------------------------------
 
     fn keys(&mut self, ctx: &egui::Context) {
@@ -494,86 +474,45 @@ impl App {
             self.paste_look(Some(&t));
         }
         let k = |m: Modifiers, key: Key| ctx.input_mut(|i| i.consume_key(m, key));
-        if k(cmd_shift, Key::E) {
-            self.open_export();
-        }
-        if k(cmd_shift, Key::R) {
-            self.do_action(ctx, controls::Action::Reset);
-        }
-        if k(cmd_shift, Key::V) && self.clipboard.is_some() {
-            self.paste_look(None);
-        }
-        if k(cmd_shift, Key::Z) {
-            self.step_history(true);
-        }
-        if k(cmd, Key::Z) {
-            self.step_history(false);
-        }
+        // shifted keys first: a key asked for without shift is also pressed with it
+        let mut keyed = vec![
+            (cmd_shift, Key::E, Command::Export),
+            (cmd_shift, Key::R, Command::ResetLook),
+            (cmd_shift, Key::V, Command::PasteLook),
+            (cmd_shift, Key::Z, Command::Redo),
+            (cmd, Key::Z, Command::Undo),
+            (cmd, Key::Quote, Command::VirtualCopy),
+            (cmd, Key::A, Command::SelectAll),
+            (cmd, Key::D, Command::SelectNone),
+            (cmd, Key::Num0, Command::Fit),
+            (cmd, Key::Num1, Command::Actual),
+            (cmd, Key::Equals, Command::Zoom(true)),
+            (cmd, Key::Plus, Command::Zoom(true)),
+            (cmd, Key::Minus, Command::Zoom(false)),
+            (none, Key::G, Command::View(Mode::Grid)),
+            (none, Key::N, Command::View(Mode::Survey)),
+            (none, Key::E, Command::View(Mode::Loupe)),
+            (none, Key::Enter, Command::View(Mode::Loupe)),
+            (none, Key::Tab, Command::Panel),
+            (none, Key::Backslash, Command::Compare(Compare::Before)),
+            (none, Key::Y, Command::Compare(Compare::Split)),
+            (none, Key::J, Command::Clipping),
+            (none, Key::S, Command::Star),
+            (none, Key::V, Command::Process(None)),
+            (none, Key::Delete, Command::Remove),
+            (none, Key::Backspace, Command::Remove),
+        ];
         #[cfg(target_os = "macos")]
-        if k(cmd_shift, Key::O) {
-            self.photos_dialog();
-        }
-        if k(cmd, Key::O) {
-            self.import_dialog();
-        }
-        if k(cmd, Key::Quote) {
-            let ids = self.lib.selection();
-            self.lib.duplicate(&ids);
-        }
-        if k(cmd, Key::A) {
-            self.lib.select_all();
-        }
-        if k(cmd, Key::D) {
-            self.lib.select_none();
-        }
-        if k(cmd, Key::Num0) {
-            self.zoom = None;
-        }
-        if k(cmd, Key::Num1) {
-            self.zoom_100();
-        }
-        let zoom_in = k(cmd, Key::Equals) || k(cmd, Key::Plus);
-        let zoom_out = k(cmd, Key::Minus);
-        if zoom_in || zoom_out {
-            let f = if zoom_in { 1.5 } else { 1.0 / 1.5 };
-            match self.mode {
-                Mode::Grid => self.thumb_pt = (self.thumb_pt * f).clamp(80.0, 480.0),
-                _ => self.zoom = Some(self.current_zoom() * f),
+        keyed.extend([(cmd_shift, Key::O, Command::OpenPhotos), (cmd, Key::R, Command::ShowInFinder)]);
+        keyed.push((cmd, Key::O, Command::Open));
+        for (m, key, c) in keyed {
+            if k(m, key) {
+                self.run(ctx, c);
             }
-        }
-        if k(none, Key::G) {
-            self.mode = Mode::Grid;
-            self.scroll_to_focus = true;
-        }
-        if k(none, Key::N) {
-            self.mode = Mode::Survey;
-        }
-        if (k(none, Key::E) || k(none, Key::Enter)) && self.lib.focus.is_some() {
-            self.mode = Mode::Loupe;
-            self.zoom = None;
         }
         if k(none, Key::Escape) && self.mode != Mode::Grid {
             self.mode = Mode::Grid;
             self.scroll_to_focus = true;
-        }
-        if k(none, Key::Tab) {
-            self.panel = !self.panel;
-        }
-        if k(none, Key::Backslash) {
-            self.toggle_compare(Compare::Before);
-        }
-        if k(none, Key::Y) {
-            self.toggle_compare(Compare::Split);
-        }
-        if k(none, Key::J) {
-            self.clipping = !self.clipping;
-        }
-        if k(none, Key::S) {
-            let ids = self.lib.selection();
-            self.lib.toggle_starred(&ids);
-        }
-        if k(none, Key::V) && !self.lib.selected().is_empty() {
-            self.do_action(ctx, controls::Action::Process(None));
         }
         if k(none, Key::Z) && self.mode == Mode::Loupe {
             if self.zoom.is_some() {
@@ -581,10 +520,6 @@ impl App {
             } else {
                 self.zoom_100();
             }
-        }
-        if k(none, Key::Delete) || k(none, Key::Backspace) {
-            let ids = self.lib.selected().clone();
-            self.forget(&ids);
         }
         let mut moved = false;
         for (key, dx, dy) in [(Key::ArrowLeft, -1, 0), (Key::ArrowRight, 1, 0), (Key::ArrowUp, 0, -1), (Key::ArrowDown, 0, 1)] {
@@ -775,11 +710,30 @@ impl eframe::App for App {
             s.step(self, ctx);
             self.shots = Some(s);
         }
+        #[cfg(target_os = "macos")]
+        let menu = self.menu.take();
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &menu {
+            // a dialog keeps the menu's commands from the library behind it, and text being
+            // typed keeps its own undo and select all
+            let typing = ctx.wants_keyboard_input();
+            for c in menu.chosen() {
+                let held = typing && matches!(c, Command::Undo | Command::Redo | Command::SelectAll | Command::SelectNone);
+                if self.export_form.is_none() && self.export_errors.is_empty() && !held {
+                    self.run(ctx, c);
+                }
+            }
+        }
         self.keys(ctx);
         let actions = self.layout(ctx);
         self.tiers.set_preview(self.preview_wanted.take());
-        for a in actions {
-            self.do_action(ctx, a);
+        #[cfg(target_os = "macos")]
+        if let Some(mut menu) = menu {
+            menu.sync(self);
+            self.menu = Some(menu);
+        }
+        for c in actions {
+            self.run(ctx, c);
         }
         self.poll_dialog();
         self.export_step();

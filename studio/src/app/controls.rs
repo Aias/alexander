@@ -2,23 +2,12 @@
 //! look commands. It edits one `Settings`; the change is carried over to every selected photo.
 
 use super::views::{segmented, LABEL, TEXT, VIEW_BG};
-use super::App;
+use super::{App, Command};
 use alexander_studio::film::{Dev, FilmKind, Filter};
 use alexander_studio::params::{Frame, Repro, Settings, View};
 use egui::collapsing_header::CollapsingState;
 use egui::{pos2, vec2, Align, Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragValue, EventFilter, FontId, Key, Layout, Rect, RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, WidgetText};
 use std::ops::RangeInclusive;
-
-pub enum Action {
-    /// None switches it over; otherwise on or off.
-    Process(Option<bool>),
-    CopyLook,
-    PasteLook,
-    Reset,
-    SaveLook,
-    LoadLook,
-    CopyFlags,
-}
 
 const LABEL_W: f32 = 104.0;
 const VALUE_W: f32 = 44.0;
@@ -29,7 +18,7 @@ const RULE: Color32 = Color32::from_gray(44);
 const HISTOGRAM: Color32 = Color32::from_gray(150);
 
 impl App {
-    pub(super) fn panel_ui(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
+    pub(super) fn panel_ui(&mut self, ui: &mut Ui, actions: &mut Vec<Command>) {
         let focus = self.lib.focus.filter(|_| !self.lib.selected().is_empty()).and_then(|f| self.lib.get(f));
         let before = self.before();
         histogram(ui, focus.and_then(|it| self.tiers.histogram(it, before)), &mut self.clipping);
@@ -97,39 +86,39 @@ fn histogram(ui: &mut Ui, bins: Option<&[f32]>, clipping: &mut bool) {
 }
 
 /// The process switch and the commands for looks as files.
-fn header(ui: &mut Ui, processed: bool, actions: &mut Vec<Action>) {
+fn header(ui: &mut Ui, processed: bool, actions: &mut Vec<Command>) {
     ui.horizontal(|ui| {
         let mut on = processed;
         ui.add_sized([ui.available_width() - 34.0, 26.0], |ui: &mut Ui| segmented(ui, &mut on, &[(false, "Original", "V"), (true, "Film", "V")]));
         if on != processed {
-            actions.push(Action::Process(Some(on)));
+            actions.push(Command::Process(Some(on)));
         }
         ui.spacing_mut().interact_size.y = 26.0;
         ui.menu_button("…", |ui| {
             ui.set_min_width(200.0);
-            let mut item = |ui: &mut Ui, text: &str, enabled: bool, a: Action| {
+            let mut item = |ui: &mut Ui, text: &str, enabled: bool, a: Command| {
                 if ui.add_enabled(enabled, Button::new(text)).clicked() {
                     actions.push(a);
                     ui.close_menu();
                 }
             };
-            item(ui, "Save Look…", processed, Action::SaveLook);
-            item(ui, "Load Look…", true, Action::LoadLook);
-            item(ui, "Copy as twb2.py Flags", processed, Action::CopyFlags);
+            item(ui, "Save Look…", processed, Command::SaveLook);
+            item(ui, "Load Look…", true, Command::LoadLook);
+            item(ui, "Copy as twb2.py Flags", processed, Command::CopyFlags);
         });
     });
 }
 
-fn footer(ui: &mut Ui, processed: bool, can_paste: bool, actions: &mut Vec<Action>) {
+fn footer(ui: &mut Ui, processed: bool, can_paste: bool, actions: &mut Vec<Command>) {
     ui.horizontal(|ui| {
-        let mut button = |ui: &mut Ui, text: &str, keys: &str, enabled: bool, a: Action| {
+        let mut button = |ui: &mut Ui, text: &str, keys: &str, enabled: bool, a: Command| {
             if ui.add_enabled(enabled, Button::new(text).min_size(vec2(64.0, 24.0))).on_hover_text(keys).clicked() {
                 actions.push(a);
             }
         };
-        button(ui, "Copy", "⇧⌘C", processed, Action::CopyLook);
-        button(ui, "Paste", "⇧⌘V", can_paste, Action::PasteLook);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| button(ui, "Reset", "⇧⌘R", processed, Action::Reset));
+        button(ui, "Copy", "⇧⌘C", processed, Command::CopyLook);
+        button(ui, "Paste", "⇧⌘V", can_paste, Command::PasteLook);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| button(ui, "Reset", "⇧⌘R", processed, Command::ResetLook));
     });
 }
 
