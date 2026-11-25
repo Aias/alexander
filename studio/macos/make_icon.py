@@ -1,7 +1,9 @@
 """Generate studio/macos/icon.png, the 1024 px source of the app icon.
 
-The icon is drawn from code so the repository carries no third-party artwork
-and anyone can regenerate it bit for bit: the noise uses a fixed seed.
+The icon is the seal from the cover of The Timeless Way of Building, drawn in
+white on a dark tile. seal.png is a photograph of the seal, centred on its
+rings; the engraving is thresholded from it and the rings are redrawn as
+exact circles.
 
     python3 studio/macos/make_icon.py
 
@@ -18,7 +20,12 @@ SIZE = 1024
 # left transparent so the Dock's shadow and spacing match other apps.
 TILE = 824
 RADIUS = 185
-SEED = 5222
+SEAL_RADIUS = 300
+# Radii in seal.png pixels, measured from the photograph's radial ink profile.
+PHOTO_OUTER = 133.5
+ENGRAVING = 124.0
+INNER_RING = (121.5, 127.0)
+OUTER_RING = (131.5, 133.5)
 
 
 def rounded_mask(size: int, tile: int, radius: int) -> np.ndarray:
@@ -35,39 +42,38 @@ def rounded_mask(size: int, tile: int, radius: int) -> np.ndarray:
     return np.clip(0.5 - dist, 0.0, 1.0)
 
 
-def grain(rng: np.random.Generator, size: int) -> np.ndarray:
-    """Clumped noise: fine noise plus a coarser layer, like silver grain."""
-    fine = rng.standard_normal((size, size))
-    coarse = rng.standard_normal((size // 2, size // 2))
-    coarse = np.kron(coarse, np.ones((2, 2)))[:size, :size]
-    g = 0.65 * fine + 0.35 * coarse
-    return g / g.std()
+def engraving(scale: float) -> np.ndarray:
+    """Ink coverage of the photographed seal, resampled onto the canvas."""
+    photo = Image.open(Path(__file__).with_name("seal.png")).convert("RGB")
+    rgb = np.asarray(photo, dtype=np.float64)
+    # Red ink against cream paper: the red-green gap separates them cleanly.
+    ink = np.clip((rgb[..., 0] - rgb[..., 1] - 30) / 130, 0.0, 1.0)
+    side = round(photo.width * scale)
+    ink = np.asarray(Image.fromarray(ink.astype(np.float32), "F").resize((side, side), Image.BICUBIC))
+    # Steepen the resampled edge to about a pixel wide, so the cut reads crisp.
+    ink = np.clip((ink - 0.5) * 8 + 0.5, 0.0, 1.0)
+    canvas = np.zeros((SIZE, SIZE))
+    o = (SIZE - side) // 2
+    canvas[o : o + side, o : o + side] = ink
+    return canvas
 
 
 def main() -> None:
-    rng = np.random.default_rng(SEED)
-    y, x = np.mgrid[0:SIZE, 0:SIZE].astype(np.float64) / (SIZE - 1)
-
-    # A dark print: deep shadows with a faint light falling from the upper
-    # left, the kind of low-key tonality a black-and-white print has.
-    light = np.exp(-(((x - 0.32) ** 2) / 0.08 + ((y - 0.30) ** 2) / 0.12))
-    horizon = 0.05 * np.clip(1.0 - np.abs(y - 0.62) * 6.0, 0.0, 1.0)
-    tone = 0.06 + 0.22 * light + horizon
-
-    # Grain is strongest in the mid-tones, as on film.
-    amount = 0.045 * (0.4 + 4.0 * tone * (1.0 - tone))
-    tone = tone + amount * grain(rng, SIZE)
-
-    # A thin paper border so the tile reads as a print rather than a flat dark
-    # square.
+    scale = SEAL_RADIUS / PHOTO_OUTER
     c = (SIZE - 1) / 2
-    inset = TILE / 2 - 46
-    border = (np.abs(x * (SIZE - 1) - c) > inset) | (np.abs(y * (SIZE - 1) - c) > inset)
-    paper = 0.86 + 0.015 * grain(rng, SIZE)
-    tone = np.where(border, paper, tone)
+    y, x = np.mgrid[0:SIZE, 0:SIZE].astype(np.float64)
+    r = np.hypot(x - c, y - c)
 
-    # Tones are display values already: no gamma lift, the print stays dark.
-    grey = np.clip(tone, 0.0, 1.0)
+    def ring(inner: float, outer: float) -> np.ndarray:
+        mid, half = (inner + outer) / 2 * scale, (outer - inner) / 2 * scale
+        return np.clip(0.5 - (np.abs(r - mid) - half), 0.0, 1.0)
+
+    inside = np.clip(ENGRAVING * scale + 0.5 - r, 0.0, 1.0)
+    seal = np.maximum.reduce([engraving(scale) * inside, ring(*INNER_RING), ring(*OUTER_RING)])
+
+    # A faint fall of light from the top, as on the system's dark icons.
+    ground = 0.15 - 0.07 * (y / (SIZE - 1))
+    grey = ground + (0.96 - ground) * seal
     alpha = rounded_mask(SIZE, TILE, RADIUS)
 
     rgba = np.empty((SIZE, SIZE, 4), dtype=np.uint8)
