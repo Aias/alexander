@@ -27,6 +27,17 @@ use std::task::{Poll, Wake, Waker};
 use tiers::Tiers;
 use workers::{Done, Job, Workers};
 
+/// How the views compare a photo's render with the photo itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compare {
+    /// The render alone.
+    After,
+    /// The photo itself alone.
+    Before,
+    /// The photo itself on one side of a divider and the render on the other.
+    Split,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Grid,
@@ -99,7 +110,13 @@ pub struct App {
     mode: Mode,
     panel: bool,
     thumb_pt: f32,
-    before: bool,
+    compare: Compare,
+    /// Split: the divider's place across the picture, from 0 to 1, and whether the photo
+    /// itself is on the right.
+    split: f32,
+    split_swap: bool,
+    /// A photo whose finished picture is being read back for the clipboard.
+    copy_image: Option<(Id, Planner)>,
     clipboard: Option<Settings>,
     /// An edit to the looks is under way (a slider held): one undo step for all of it.
     edit_open: bool,
@@ -143,7 +160,10 @@ impl App {
             mode: Mode::Grid,
             panel: true,
             thumb_pt: 168.0,
-            before: false,
+            compare: Compare::After,
+            split: 0.5,
+            split_swap: false,
+            copy_image: None,
             clipboard: None,
             edit_open: false,
             zoom: None,
@@ -488,7 +508,10 @@ impl App {
             self.panel = !self.panel;
         }
         if k(none, Key::Backslash) {
-            self.before = !self.before;
+            self.toggle_compare(Compare::Before);
+        }
+        if k(none, Key::Y) {
+            self.toggle_compare(Compare::Split);
         }
         if k(none, Key::V) && !self.lib.selected().is_empty() {
             self.do_action(ctx, controls::Action::Process(None));
@@ -613,14 +636,7 @@ impl App {
                 };
                 self.workers.send(job);
             }
-            Err(loads) => {
-                for (id, long) in loads {
-                    if let Some(it) = self.lib.get(id) {
-                        self.tiers.loading.insert((id, long));
-                        self.workers.send(Job::Full { id, path: it.path.clone(), long });
-                    }
-                }
-            }
+            Err(loads) => self.load_fulls(loads),
         }
     }
 
@@ -635,6 +651,48 @@ impl App {
     }
 
     /// Nothing loading, rendering or exporting.
+    fn load_fulls(&mut self, loads: Vec<(Id, u32)>) {
+        for (id, long) in loads {
+            if let Some(it) = self.lib.get(id) {
+                self.tiers.loading.insert((id, long));
+                self.workers.send(Job::Full { id, path: it.path.clone(), long });
+            }
+        }
+    }
+
+    /// Put the finished picture of a photo on the clipboard at the size of its simulation
+    /// grid, cut to the picture inside its border when the look strips it, once the photo's
+    /// full grid has loaded.
+    fn copy_image_step(&mut self, ctx: &egui::Context) {
+        let Some((id, planner)) = &mut self.copy_image else { return };
+        let Some(item) = self.lib.get(*id) else {
+            self.copy_image = None;
+            return;
+        };
+        match self.tiers.export_pixels(item, planner) {
+            Ok(Some((w, h, rgba))) => {
+                let mut pic = export::Picture { w, h, rgba };
+                if let Some(a) = item.crop() {
+                    pic = pic.crop(&a);
+                }
+                let bytes: Vec<u8> = pic.rgba.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8).collect();
+                ctx.copy_image(egui::ColorImage::from_rgba_unmultiplied([pic.w as usize, pic.h as usize], &bytes));
+                self.copy_image = None;
+            }
+            Ok(None) => self.copy_image = None,
+            Err(loads) => self.load_fulls(loads),
+        }
+    }
+
+    fn before(&self) -> bool {
+        self.compare == Compare::Before
+    }
+
+    /// Switch a compare on, or off again when it is already on.
+    fn toggle_compare(&mut self, c: Compare) {
+        self.compare = if self.compare == c { Compare::After } else { c };
+    }
+
     fn idle(&self) -> bool {
         self.opening == 0 && self.workers.queued() == 0 && self.tiers.loading.is_empty() && !self.pending && self.export_run.is_none()
     }
@@ -659,23 +717,19 @@ impl eframe::App for App {
         }
         self.poll_dialog();
         self.export_step();
-        let (loads, pending) = self.tiers.process(&self.lib, self.before);
+        self.copy_image_step(ctx);
+        let (loads, pending) = self.tiers.process(&self.lib, self.before());
         self.pending = pending;
         // while a knob is held the grid size may be passing through many values
         if !self.edit_open {
-            for (id, long) in loads {
-                if let Some(it) = self.lib.get(id) {
-                    self.tiers.loading.insert((id, long));
-                    self.workers.send(Job::Full { id, path: it.path.clone(), long });
-                }
-            }
+            self.load_fulls(loads);
         } else {
             self.pending = true;
         }
         if !ctx.input(|i| i.pointer.any_down()) {
             self.edit_open = false;
         }
-        if self.pending || self.export_run.is_some() || self.shots.is_some() {
+        if self.pending || self.export_run.is_some() || self.copy_image.is_some() || self.shots.is_some() {
             ctx.request_repaint();
         }
         if self.tiers.trace {

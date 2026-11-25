@@ -6,7 +6,7 @@ use super::App;
 use alexander_studio::film::{Dev, FilmKind, Filter};
 use alexander_studio::params::{Frame, Repro, Settings, View};
 use egui::collapsing_header::CollapsingState;
-use egui::{pos2, vec2, Align, Align2, Button, Color32, ComboBox, CornerRadius, DragValue, EventFilter, FontId, Key, Label, Layout, Rect, RichText, Sense, Shape, Stroke, Ui};
+use egui::{pos2, vec2, Align, Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragValue, EventFilter, FontId, Key, Layout, Rect, RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, WidgetText};
 use std::ops::RangeInclusive;
 
 pub enum Action {
@@ -31,7 +31,8 @@ const HISTOGRAM: Color32 = Color32::from_gray(150);
 impl App {
     pub(super) fn panel_ui(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
         let focus = self.lib.focus.filter(|_| !self.lib.selected().is_empty()).and_then(|f| self.lib.get(f));
-        histogram(ui, focus.and_then(|it| self.tiers.histogram(it, self.before)));
+        let before = self.before();
+        histogram(ui, focus.and_then(|it| self.tiers.histogram(it, before)));
         let processed = focus.is_some_and(|it| it.look.is_some());
         let mut s = focus.and_then(|it| it.look.clone().or_else(|| it.stash.clone())).unwrap_or_default();
         let enabled = focus.is_some();
@@ -155,41 +156,56 @@ pub fn slider(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, width: f32) 
     r
 }
 
-fn label_cell(ui: &mut Ui, label: &str, sense: Sense) -> egui::Response {
-    let size = vec2(LABEL_W, ui.spacing().interact_size.y);
-    ui.allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), |ui| {
-        ui.set_min_size(size);
-        ui.add(Label::new(RichText::new(label).color(LABEL)).sense(sense).truncate())
-    })
-    .inner
+/// A setting's name. When the setting is off its default the name reads as a link under
+/// the pointer, and a click on it asks for the default back: the return value.
+fn name(ui: &mut Ui, label: &str, tip: &str, changed: bool) -> bool {
+    let (rect, r) = ui.allocate_exact_size(vec2(LABEL_W, ui.spacing().interact_size.y), if changed { Sense::click() } else { Sense::hover() });
+    let link = changed && r.hovered();
+    if link {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    let text = RichText::new(label).color(if link { TEXT } else { LABEL });
+    let galley = WidgetText::from(if link { text.underline() } else { text }).into_galley(ui, Some(TextWrapMode::Truncate), rect.width(), TextStyle::Body);
+    ui.painter().galley(pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, LABEL);
+    let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
+    changed && r.clicked()
 }
 
-/// A labelled slider and its value. Double-clicking the label or the slider restores the
-/// default; the value can be dragged or typed, past the slider's ends too.
+/// A labelled slider and its value. Clicking the name or double-clicking the slider
+/// restores the default; the value can be dragged or typed, past the slider's ends too.
 fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize) {
     ui.horizontal(|ui| {
-        let l = label_cell(ui, label, Sense::click());
-        let l = if tip.is_empty() { l } else { l.on_hover_text(tip) };
+        let reset = name(ui, label, tip, *v != default);
         let speed = (range.end() - range.start()) / 300.0;
         let w = ui.available_width() - VALUE_W - ui.spacing().item_spacing.x;
         let r = slider(ui, v, range, w);
         ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
         ui.spacing_mut().button_padding.x = 2.0;
         ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).fixed_decimals(decimals));
-        if l.double_clicked() || r.double_clicked() {
+        if reset || r.double_clicked() {
             *v = default;
         }
     });
 }
 
-fn row(ui: &mut Ui, label: &str, tip: &str, add: impl FnOnce(&mut Ui)) {
+/// A named row of controls; true when the name was clicked to restore the default.
+fn row(ui: &mut Ui, label: &str, tip: &str, changed: bool, add: impl FnOnce(&mut Ui)) -> bool {
     ui.horizontal(|ui| {
-        let l = label_cell(ui, label, Sense::hover());
-        if !tip.is_empty() {
-            l.on_hover_text(tip);
-        }
+        let reset = name(ui, label, tip, changed);
         add(ui);
-    });
+        reset
+    })
+    .inner
+}
+
+/// A setting of a few values as a row of toggles, each with its longer name, if any, as a tooltip.
+fn toggles<T: PartialEq + Copy>(ui: &mut Ui, label: &str, tip: &str, v: &mut T, default: T, options: &[(T, &str, &str)]) {
+    if row(ui, label, tip, *v != default, |ui| {
+        ui.style_mut().override_text_style = Some(TextStyle::Small);
+        ui.add_sized([ui.available_width(), ui.spacing().interact_size.y + 2.0], |ui: &mut Ui| segmented(ui, v, options));
+    }) {
+        *v = default;
+    }
 }
 
 fn combo<T: PartialEq + Copy>(ui: &mut Ui, id: &str, v: &mut T, options: &[(T, &str)]) {
@@ -201,10 +217,12 @@ fn combo<T: PartialEq + Copy>(ui: &mut Ui, id: &str, v: &mut T, options: &[(T, &
     });
 }
 
-fn check(ui: &mut Ui, label: &str, tip: &str, v: &mut bool) {
-    row(ui, label, tip, |ui| {
+fn check(ui: &mut Ui, label: &str, tip: &str, v: &mut bool, default: bool) {
+    if row(ui, label, tip, *v != default, |ui| {
         ui.add(egui::Checkbox::without_text(v));
-    });
+    }) {
+        *v = default;
+    }
 }
 
 /// A section of knobs under a heading that opens and closes it. With `switch` the heading
@@ -234,8 +252,13 @@ fn section(ui: &mut Ui, name: &str, open: bool, switch: Option<&mut bool>, add: 
 fn knobs(ui: &mut Ui, s: &mut Settings) {
     let d = Settings::default();
     section(ui, "Film", true, None, |ui| {
-        row(ui, "Stock", "", |ui| combo(ui, "film", &mut s.film, &FilmKind::ALL.map(|k| (k, k.label()))));
-        row(ui, "Filter", "", |ui| combo(ui, "filter", &mut s.filter, &[(Filter::None, "None"), (Filter::Yellow, "Yellow"), (Filter::Orange, "Orange"), (Filter::Red, "Red")]));
+        let stock = |k: FilmKind| match k {
+            FilmKind::Trix1956 => "Tri-X ’56",
+            FilmKind::Trix => "Tri-X",
+            FilmKind::DoubleX => "Double-X",
+        };
+        toggles(ui, "Stock", "", &mut s.film, d.film, &FilmKind::ALL.map(|k| (k, stock(k), k.label())));
+        toggles(ui, "Filter", "", &mut s.filter, d.filter, &[(Filter::None, "None", ""), (Filter::Yellow, "Yellow", ""), (Filter::Orange, "Orange", ""), (Filter::Red, "Red", "")]);
         knob(ui, "Size", "Long edge of film the picture fills, mm. 36 is a full 35mm frame", &mut s.film_mm, 8.0..=72.0, d.film_mm, 1);
         let mut kind = match s.dev {
             None => 0,
@@ -245,8 +268,9 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
             Some(Dev::Norm1981) => 4,
         };
         let was = kind;
-        row(ui, "Development", "", |ui| combo(ui, "dev", &mut kind, &[(0, "Datasheet"), (1, "Minutes"), (2, "1952 norm"), (3, "1956 norm"), (4, "1981 norm")]));
-        if kind != was {
+        if row(ui, "Development", "", s.dev != d.dev, |ui| combo(ui, "dev", &mut kind, &[(0, "Datasheet"), (1, "Minutes"), (2, "1952 norm"), (3, "1956 norm"), (4, "1981 norm")])) {
+            s.dev = d.dev;
+        } else if kind != was {
             s.dev = match kind {
                 0 => None,
                 1 => Some(Dev::Minutes(if s.film == FilmKind::DoubleX { 6.0 } else { 7.0 })),
@@ -261,14 +285,13 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
         }
     });
     section(ui, "Exposure", true, None, |ui| {
-        check(ui, "Auto", "", &mut s.auto_ev);
+        check(ui, "Auto", "", &mut s.auto_ev, d.auto_ev);
         if s.auto_ev {
             knob(ui, "Auto target", "Display value the median is placed at", &mut s.auto_ev_target, 0.2..=0.7, d.auto_ev_target, 2);
         }
         knob(ui, "Exposure", "Stops", &mut s.ev, -3.0..=3.0, d.ev, 2);
-        row(ui, "Border", "A uniform border round the picture, such as a print's paper or letterbox bars. Keep: exposure and tones are measured inside it. Strip: the same, and only the picture inside is shown and exported. Off: not looked for", |ui| {
-            combo(ui, "frame", &mut s.frame, &[(Frame::Keep, "Keep"), (Frame::Strip, "Strip"), (Frame::Off, "Off")])
-        });
+        let border = "A uniform border round the picture, such as a print's paper or letterbox bars. Keep: exposure and tones are measured inside it. Strip: the same, and only the picture inside is shown and exported. Off: not looked for";
+        toggles(ui, "Border", border, &mut s.frame, d.frame, &[(Frame::Keep, "Keep", ""), (Frame::Strip, "Strip", ""), (Frame::Off, "Off", "")]);
     });
     section(ui, "Lens", true, None, |ui| {
         knob(ui, "Softness", "Blur on the film, µm", &mut s.lens_um, 0.0..=40.0, d.lens_um, 1);
@@ -295,7 +318,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
         knob(ui, "House tones", "0: straight print. 1: the book's tone range", &mut s.house, 0.0..=1.0, d.house, 2);
     });
     section(ui, "Reproduction", true, None, |ui| {
-        row(ui, "Finish", "", |ui| combo(ui, "repro", &mut s.repro, &[(Repro::None, "Print"), (Repro::Copy, "Copied from a page"), (Repro::Book, "Book page")]));
+        toggles(ui, "Finish", "", &mut s.repro, d.repro, &[(Repro::None, "Print", ""), (Repro::Copy, "Copy", "Copied from a page"), (Repro::Book, "Book", "Book page")]);
         match s.repro {
             Repro::None => {}
             Repro::Copy => {
@@ -307,7 +330,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
             }
             Repro::Book => {
                 let mut auto = s.page_mm.is_none();
-                check(ui, "Page size auto", "From the file's size at the PPI below", &mut auto);
+                check(ui, "Page size auto", "From the file's size at the PPI below", &mut auto, d.page_mm.is_none());
                 if auto {
                     s.page_mm = None;
                     knob(ui, "PPI", "", &mut s.ppi, 72.0..=600.0, d.ppi, 0);
@@ -328,7 +351,9 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
     if s.repro == Repro::Book {
         section(ui, "Viewing", true, None, |ui| {
             let mut v = s.view;
-            row(ui, "View", "", |ui| combo(ui, "view", &mut v, &[(None, "Auto"), (Some(View::Scan), "Scan"), (Some(View::White), "Ink on white"), (Some(View::Page), "Ink on cream"), (Some(View::Print), "Print")]));
+            if row(ui, "View", "", v != d.view, |ui| combo(ui, "view", &mut v, &[(None, "Auto"), (Some(View::Scan), "Scan"), (Some(View::White), "Ink on white"), (Some(View::Page), "Ink on cream"), (Some(View::Print), "Print")])) {
+                v = d.view;
+            }
             s.view = v;
             if s.view_mode() == View::Scan {
                 knob(ui, "Scan black", "Display value of solid ink", &mut s.scan_black, 0.0..=0.3, d.scan_black, 3);
@@ -340,8 +365,10 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
         let mut grid = s.detail_px as f64;
         knob(ui, "Grid", "Long edge of the simulation grid, px. 0 is the photo's own size", &mut grid, 0.0..=8192.0, d.detail_px as f64, 0);
         s.detail_px = ((grid / 32.0).round() * 32.0).clamp(0.0, 16384.0) as u32;
-        row(ui, "Seed", "Grain pattern", |ui| {
+        if row(ui, "Seed", "Grain pattern", s.seed != d.seed, |ui| {
             ui.add(DragValue::new(&mut s.seed).range(0..=u32::MAX));
-        });
+        }) {
+            s.seed = d.seed;
+        }
     });
 }

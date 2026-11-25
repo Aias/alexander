@@ -2,7 +2,7 @@
 //! set, the app opens the photos given on the command line, walks through its views,
 //! saves a screenshot of each into the folder, exports the selection there and quits.
 
-use super::{App, ExportForm, Mode, SizeChoice};
+use super::{App, Compare, ExportForm, Mode, SizeChoice};
 use alexander_studio::export::Format;
 use alexander_studio::params::Settings;
 use std::path::PathBuf;
@@ -110,18 +110,29 @@ impl Shots {
                 self.shot(ctx, "6-grade")
             }
             12 => {
+                app.compare = Compare::Split;
+                self.step += 1;
+            }
+            13 if settled => self.shot(ctx, "7-split"),
+            14 => {
+                app.mode = Mode::Survey;
+                self.step += 1;
+            }
+            15 if settled => self.shot(ctx, "8-split-survey"),
+            16 => {
+                app.compare = Compare::After;
                 app.open_export();
                 self.step += 1;
             }
-            13 if settled && self.idle >= 12 => self.shot(ctx, "7-export"),
-            14 => {
+            17 if settled && self.idle >= 12 => self.shot(ctx, "9-export"),
+            18 => {
                 app.export_form = None;
                 let dir = self.dir.join("export");
                 let _ = std::fs::create_dir_all(&dir);
                 app.start_export(ExportForm { dir, dir_ok: true, format: Format::Png8, size: SizeChoice::Original, long: 0 });
                 self.step += 1;
             }
-            15 if settled => {
+            19 if settled => {
                 eprintln!("export finished; errors: {:?}", app.export_errors);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 self.step += 1;

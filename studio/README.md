@@ -41,8 +41,16 @@ again from the original file, so changing a look never processes a processed pic
 Three views, named as in Lightroom: Grid, all photos (G); Survey, the selected photos side
 by side (N); and Loupe, one photo large (E, Return, or double-click). Survey and Loupe
 have a filmstrip. The bar under the view counts the photos and the selection, names the
-focused photo, switches Before on and off, and holds the thumbnail size in the grid and
+focused photo, holds the compare switches, and holds the thumbnail size in the grid and
 the zoom in the loupe.
+
+Before (`\`) shows the photo itself in place of its render. Split (Y) shows both, in
+Survey and Loupe, with the photo itself left of a divider and the render right of it. Drag
+the divider to move it, and press Swap to put the photo itself on the right. Moving the
+divider draws the picture again without rendering it again.
+
+Right-clicking a photo copies its file path, or its finished picture as an image at the
+size of its simulation grid, cut to the picture inside its border when the look strips it.
 
 | Keys | Does |
 | --- | --- |
@@ -55,7 +63,8 @@ the zoom in the loupe.
 | ⌘A / ⌘D | Select all / none |
 | Delete or Backspace | Remove from the library (the file stays on disk) |
 | V | Switch the process on or off for the selection |
-| \\ | Before and after |
+| \\ | Before |
+| Y | Split before and after |
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |
 | ⇧⌘R | Reset the selection to the original |
 | ⌘Z / ⇧⌘Z | Undo and redo changes to looks |
@@ -74,8 +83,10 @@ picture inside, in every view and thumbnail, without rendering again; Off does n
 
 The knobs are grouped as the process runs: Film, Exposure, Lens, Grain, Edge Effects
 (switched on and off at its heading), Print, Reproduction and Simulation. Clicking a
-heading opens or closes it. Double-clicking a knob or its name restores its default; its
-value can also be dragged or typed. Copy, Paste and Reset sit under the knobs, and the
+heading opens or closes it. A setting off its default underlines its name under the
+pointer, and clicking the name restores the default; double-clicking a slider does the
+same. A slider's value can also be dragged or typed. Stock, Filter, Border and Finish are
+rows of toggles; the full names of the stocks and finishes are in their tooltips. Copy, Paste and Reset sit under the knobs, and the
 panel's … menu saves and loads looks as JSON and copies the look as `twb2.py` flags. In
 the loupe 100% means one pixel of the simulation grid to one pixel of the screen.
 

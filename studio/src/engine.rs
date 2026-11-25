@@ -62,12 +62,21 @@ struct Cache {
 }
 
 /// Where a canvas looks: `origin` is the picture position of its top-left corner and
-/// `scale` the number of picture pixels per canvas pixel.
+/// `scale` the number of picture pixels per canvas pixel. The canvas columns from
+/// `source[0]` up to `source[1]`, in canvas pixels, show the photo itself instead of its
+/// render.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Canvas {
     pub origin: [f32; 2],
     pub scale: f32,
-    pub show_source: bool,
+    pub source: [f32; 2],
+}
+
+impl Canvas {
+    /// `source` for a canvas that shows the photo itself throughout.
+    pub const PHOTO: [f32; 2] = [-1e9, 1e9];
+    /// `source` for a canvas that shows the render throughout.
+    pub const RENDER: [f32; 2] = [0.0, 0.0];
 }
 
 struct Table {
@@ -579,7 +588,7 @@ impl Engine {
             [c.origin[0], c.origin[1], c.scale, level as f32],
             [mode, tone::lin_to_srgb(view.solid as f64) as f32, view.scan_black, view.scan_white],
             [cream[0], cream[1], cream[2], if raw { 0.0 } else { 1.0 }],
-            [if c.show_source { 1.0 } else { 0.0 }, if raw { 1.0 } else { 0.0 }, 0.0, 0.0],
+            [c.source[0], if raw { 1.0 } else { 0.0 }, c.source[1], 0.0],
         ]
     }
 
@@ -588,7 +597,9 @@ impl Engine {
     pub fn draw(&mut self, photo: &mut Photo, view: &ViewPlan, canvas: &Canvas, target: &wgpu::TextureView, format: Format, raw: bool) {
         let mut enc = self.gpu.encoder();
         let mut level = 0;
-        if let (Some(c), false) = (photo.cache.as_mut(), canvas.show_source) {
+        let source = if photo.cache.is_none() { Canvas::PHOTO } else { canvas.source };
+        let photo_only = source == Canvas::PHOTO;
+        if let (Some(c), false) = (photo.cache.as_mut(), photo_only) {
             if canvas.scale >= 2.0 {
                 level = (canvas.scale.log2().floor() as u32).min(c.fin.mips - 1);
             }
@@ -600,12 +611,11 @@ impl Engine {
                 c.fin_levels += 1;
             }
         }
-        let fin = match (&photo.cache, canvas.show_source) {
+        let fin = match (&photo.cache, photo_only) {
             (Some(c), false) => &c.fin.view,
             _ => &photo.src.view,
         };
-        let show_source = canvas.show_source || photo.cache.is_none();
-        let numbers = Self::canvas_numbers(view, &Canvas { show_source, ..*canvas }, level, raw);
+        let numbers = Self::canvas_numbers(view, &Canvas { source, ..*canvas }, level, raw);
         self.gpu.pass(&mut enc, Pass::Canvas, target, format, &numbers, &[fin, &photo.src.view], &[]);
         self.gpu.submit(enc);
     }
@@ -615,7 +625,7 @@ impl Engine {
     pub fn read_display(&mut self, photo: &mut Photo, view: &ViewPlan, step: u32) -> (u32, u32, Vec<f32>) {
         let (w, h) = (photo.size().0.div_ceil(step), photo.size().1.div_ceil(step));
         let target = self.take(w, h, Format::Rgba32Float);
-        self.draw(photo, view, &Canvas { origin: [0.0, 0.0], scale: step as f32, show_source: false }, &target.view, Format::Rgba32Float, true);
+        self.draw(photo, view, &Canvas { origin: [0.0, 0.0], scale: step as f32, source: Canvas::RENDER }, &target.view, Format::Rgba32Float, true);
         let bytes = self.gpu.read(&target, 16);
         self.give(target);
         (w, h, bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
