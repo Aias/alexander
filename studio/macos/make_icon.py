@@ -21,7 +21,7 @@ SIZE = 1024
 # left transparent so the Dock's shadow and spacing match other apps.
 TILE = 824
 RADIUS = 185
-SEAL_RADIUS = 300
+SEAL_RADIUS = 330
 # Outer edge of the seal's fine border, in seal.svg's 1024-unit view box.
 SVG_OUTER = 481.5
 
