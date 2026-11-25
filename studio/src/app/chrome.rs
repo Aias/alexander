@@ -1,7 +1,7 @@
 //! The window's chrome: the toolbar, the status bar under the view, and the dialogs.
 
 use super::views::{segmented, LABEL};
-use super::{controls, App, Mode, SizeChoice};
+use super::{controls, paths, App, Dialog, Mode, SizeChoice};
 use alexander_studio::export::Format;
 use egui::{vec2, Align, Align2, Button, FontId, Key, Layout, Margin, Rect, RichText, Ui};
 
@@ -25,6 +25,10 @@ impl App {
             ui.horizontal_centered(|ui| {
                 if ui.button("Open…").on_hover_text("⌘O").clicked() {
                     self.import_dialog();
+                }
+                #[cfg(target_os = "macos")]
+                if ui.button("Open from Photos…").on_hover_text("⇧⌘O").clicked() {
+                    self.photos_dialog();
                 }
                 if self.lib.is_empty() {
                     return;
@@ -96,9 +100,18 @@ impl App {
 
     pub(super) fn empty(&mut self, ui: &mut Ui) {
         let c = ui.max_rect().center();
-        if ui.put(Rect::from_center_size(c, vec2(168.0, 34.0)), Button::new(RichText::new("Open Photos…").size(14.0))).clicked() {
-            self.import_dialog();
-        }
+        let big = |text: &str| Button::new(RichText::new(text).size(14.0)).min_size(vec2(168.0, 34.0));
+        let row = Rect::from_center_size(c, vec2(if cfg!(target_os = "macos") { 346.0 } else { 168.0 }, 34.0));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(row).layout(Layout::left_to_right(Align::Center)), |ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            if ui.add(big("Open…")).clicked() {
+                self.import_dialog();
+            }
+            #[cfg(target_os = "macos")]
+            if ui.add(big("Open from Photos…")).clicked() {
+                self.photos_dialog();
+            }
+        });
         ui.painter().text(c + vec2(0.0, 36.0), Align2::CENTER_CENTER, "or drop photos and folders here", FontId::proportional(12.0), LABEL);
     }
 
@@ -106,7 +119,7 @@ impl App {
         let Some(mut form) = self.export_form.take() else { return };
         let n = self.exportable();
         let ready = n > 0 && form.dir_ok;
-        let (mut go, mut cancel) = (false, false);
+        let (mut go, mut cancel, mut choose) = (false, false, None);
         let modal = egui::Modal::new(egui::Id::new("export")).frame(dialog_frame(ctx)).show(ctx, |ui| {
             ui.set_width(340.0);
             ui.heading(if n == 1 { "Export 1 Photo".to_string() } else { format!("Export {n} Photos") });
@@ -116,10 +129,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("Choose…").clicked() {
-                            if let Some(d) = rfd::FileDialog::new().set_directory(&form.dir).pick_folder() {
-                                form.dir_ok = d.is_dir();
-                                form.dir = d;
-                            }
+                            choose = Some(rfd::AsyncFileDialog::new().set_directory(&form.dir));
                         }
                         let name = form.dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| form.dir.display().to_string());
                         ui.with_layout(Layout::left_to_right(Align::Center), |ui| ui.add(egui::Label::new(name).truncate()).on_hover_text(form.dir.display().to_string()));
@@ -157,6 +167,9 @@ impl App {
                 cancel = ui.add(Button::new("Cancel").min_size(DIALOG_BUTTON)).clicked();
             });
         });
+        if let Some(d) = choose {
+            self.ask(Dialog::ExportFolder, async move { paths(d.pick_folder().await) });
+        }
         go |= ready && ctx.input(|i| i.key_pressed(Key::Enter));
         if go {
             self.last_dir = Some(form.dir.clone());
