@@ -321,18 +321,15 @@ impl App {
         match result {
             Err(e) => self.lib.get_mut(id).unwrap().status = Status::Failed(e),
             Ok(o) => {
-                // an export of ours came back as its original: one entry per original
+                // an export of ours came back as its original: shown on the original or a copy of it
                 if o.path != it.path {
                     if let Some(other) = self.lib.find_path(&o.path) {
-                        if o.look.is_some() {
-                            self.lib.checkpoint(&[other]);
-                            self.lib.set_look(&[other], o.look);
-                        }
+                        let shown = o.look.map_or(other, |l| self.lib.give_look(other, l));
                         let was_focus = self.lib.focus == Some(id);
                         self.tiers.forget(id);
                         self.lib.take_out(&[id].into());
                         if was_focus {
-                            self.lib.click(other);
+                            self.lib.click(shown);
                         }
                         return;
                     }
@@ -494,6 +491,10 @@ impl App {
         }
         if k(cmd, Key::O) {
             self.import_dialog();
+        }
+        if k(cmd, Key::Quote) {
+            let ids = self.lib.selection();
+            self.lib.duplicate(&ids);
         }
         if k(cmd, Key::A) {
             self.lib.select_all();

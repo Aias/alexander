@@ -208,6 +208,9 @@ impl App {
             if item(ui, "Copy Image", "", ready && looked && self.copy_image.is_none()) {
                 self.copy_image = Some((id, Planner::new()));
             }
+            if item(ui, "Create Virtual Copy", "⌘'", ready) {
+                self.lib.duplicate(&self.lib.selection());
+            }
             ui.separator();
             if item(ui, if unstarred { "Star" } else { "Remove Star" }, "S", true) {
                 self.lib.toggle_starred(&ids.iter().copied().collect::<Vec<_>>());
@@ -313,7 +316,7 @@ impl App {
             let y = cell.max.y - name_h / 2.0 - 4.0;
             let badge = item.look.is_some().then(|| ui.painter().layout_no_wrap("±".into(), FontId::proportional(11.5), LABEL));
             let badge_w = badge.as_ref().map_or(0.0, |g| g.size().x + 6.0);
-            let mut job = LayoutJob::simple_singleline(item.name.clone(), FontId::proportional(11.0), colour);
+            let mut job = LayoutJob::simple_singleline(item.title(), FontId::proportional(11.0), colour);
             job.wrap = TextWrapping::truncate_at_width(inner.width() - badge_w);
             let name = ui.fonts(|f| f.layout_job(job));
             ui.painter().galley(pos2(inner.min.x, y - name.size().y / 2.0), name, colour);

@@ -34,8 +34,11 @@ pub fn film_index(k: FilmKind) -> usize {
     FilmKind::ALL.iter().position(|&f| f == k).unwrap_or(0)
 }
 
+#[derive(Clone)]
 pub struct Item {
     pub id: Id,
+    /// 0 for the photo itself; 1 and up for its virtual copies, numbered as they were made.
+    pub copy: u32,
     pub path: PathBuf,
     pub name: String,
     pub status: Status,
@@ -90,6 +93,15 @@ impl Item {
 
     pub fn ready(&self) -> bool {
         self.status == Status::Ready
+    }
+
+    /// The file's name, and which copy this is for a virtual copy.
+    pub fn title(&self) -> String {
+        if self.copy == 0 {
+            self.name.clone()
+        } else {
+            format!("{} · Copy {}", self.name, self.copy)
+        }
     }
 }
 
@@ -191,7 +203,7 @@ impl Library {
         self.rev += 1;
         self.by_path.insert(path.clone(), id);
         self.index.insert(id, self.items.len());
-        self.items.push(Item { id, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, frame: None, look: None, stash: None, gen: 0, starred: false });
+        self.items.push(Item { id, copy: 0, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, frame: None, look: None, stash: None, gen: 0, starred: false });
         if !self.starred_only {
             self.shown_index.insert(id, self.shown.len());
             self.shown.push(id);
@@ -226,7 +238,6 @@ impl Library {
                 self.items.push(it);
             }
         }
-        self.by_path.retain(|_, id| !ids.contains(id));
         self.reindex();
         self.selected.retain(|id| !ids.contains(id));
         if self.focus.is_some_and(|f| ids.contains(&f)) {
@@ -253,7 +264,6 @@ impl Library {
         self.rev += 1;
         self.selected.clear();
         for (i, it) in items {
-            self.by_path.insert(it.path.clone(), it.id);
             self.selected.insert(it.id);
             self.items.insert(i.min(self.items.len()), it);
         }
@@ -263,8 +273,10 @@ impl Library {
         self.drop_hidden();
     }
 
+    /// Index the photos by id and by file, the first photo of a file standing for its copies.
     fn reindex(&mut self) {
         self.index = self.items.iter().enumerate().map(|(i, it)| (it.id, i)).collect();
+        self.by_path = self.items.iter().rev().map(|it| (it.path.clone(), it.id)).collect();
         self.shown = self.items.iter().filter(|it| it.starred || !self.starred_only).map(|it| it.id).collect();
         self.shown_index = self.shown.iter().enumerate().map(|(i, &id)| (id, i)).collect();
     }
@@ -412,7 +424,51 @@ impl Library {
 
     /// Selected photos in library order.
     pub fn selection(&self) -> Vec<Id> {
-        self.selected.iter().copied().collect()
+        let mut ids: Vec<Id> = self.selected.iter().copied().collect();
+        ids.sort_by_key(|&id| self.position(id));
+        ids
+    }
+
+    /// Make a virtual copy of each photo, with its look, after the photo and its other
+    /// copies, and select the copies. Undo takes them away. Returns the copies.
+    pub fn duplicate(&mut self, ids: &[Id]) -> Vec<Id> {
+        let mut made = Vec::new();
+        for &id in ids {
+            let Some(it) = self.get(id).filter(|it| it.ready()) else { continue };
+            let path = it.path.clone();
+            let mut copy = it.clone();
+            copy.id = self.next_id;
+            copy.copy = self.items.iter().filter(|o| o.path == path).map(|o| o.copy).max().unwrap_or(0) + 1;
+            copy.starred = false;
+            self.next_id += 1;
+            let after = self.items.iter().rposition(|o| o.path == path).unwrap_or(self.items.len() - 1);
+            made.push(copy.id);
+            self.items.insert(after + 1, copy);
+        }
+        if made.is_empty() {
+            return made;
+        }
+        self.rev += 1;
+        self.reindex();
+        self.selected = made.iter().copied().collect();
+        self.focus = made.first().copied();
+        self.anchor = self.focus;
+        self.push_undo(Step::Restored(made.clone()));
+        made
+    }
+
+    /// Show `look` on the photo `id` or a copy of it, as when an export of it is opened: on
+    /// the copy that has that look already, on the photo itself when it has no look, or else
+    /// on a new virtual copy. Returns the photo that shows it.
+    pub fn give_look(&mut self, id: Id, look: Settings) -> Id {
+        let Some(path) = self.get(id).map(|it| it.path.clone()) else { return id };
+        if let Some(same) = self.items.iter().find(|it| it.path == path && it.look.as_ref() == Some(&look)) {
+            return same.id;
+        }
+        let target = if self.get(id).is_some_and(|it| it.look.is_none()) { id } else { self.duplicate(&[id]).first().copied().unwrap_or(id) };
+        self.checkpoint(&[target]);
+        self.set_look(&[target], Some(look));
+        target
     }
 
     // ---------- looks ----------------------------------------------------------------------

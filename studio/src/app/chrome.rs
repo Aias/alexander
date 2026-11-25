@@ -105,7 +105,7 @@ impl App {
                     info += &format!(" / {k} selected");
                 }
                 if let Some(it) = self.lib.focus.and_then(|f| self.lib.get(f)) {
-                    info += &format!(" / {}", it.name);
+                    info += &format!(" / {}", it.title());
                 }
                 ui.add(egui::Label::new(RichText::new(info).color(LABEL)).truncate());
             });

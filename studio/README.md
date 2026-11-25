@@ -56,8 +56,15 @@ Survey and Loupe, with the photo itself left of a divider and the render right o
 the divider to move it, and press Swap to put the photo itself on the right. Moving the
 divider draws the picture again without rendering it again.
 
+A virtual copy is a second entry for the same file with a look of its own, so that two
+looks of one photo can stand side by side in Survey. It follows its photo in the library
+and is named for it, as in "IMG_1414.jpeg · Copy 1". Opening an export of a photo already
+in the library shows its look on the copy that has it, on the photo when the photo has no
+look, or else on a new virtual copy.
+
 Right-clicking a photo opens a menu of what can be done to it: open it in the loupe, show
-it in the Finder, copy its file path, copy its finished picture as an image, switch the
+it in the Finder, copy its file path, copy its finished picture as an image, make a
+virtual copy, star it, switch the
 process on or off, copy, paste or reset its look, export it, or remove it from the
 library. As in the Finder, a photo outside the selection becomes the selection first, so
 the commands act on every photo selected. Copy Image copies the photo clicked at the size
@@ -75,6 +82,7 @@ of its simulation grid, cut to the picture inside its border when the look strip
 | Delete or Backspace | Remove from the library (the file stays on disk; ⌘Z puts it back) |
 | V | Switch the process on or off for the selection |
 | S | Star the selection, or take its stars away |
+| ⌘' | Make a virtual copy of each selected photo |
 | \\ | Before |
 | Y | Split before and after |
 | J | Mark clipped highlights red and clipped shadows blue |

@@ -65,7 +65,8 @@ impl Shots {
                 self.step += 1;
             }
             2 if settled && !app.lib.is_empty() => {
-                // a few photos selected, three of them given the process
+                // a few photos selected, three of them given the process, and a virtual copy
+                app.lib.duplicate(&[app.lib.items()[1].id]);
                 let ids: Vec<u64> = app.lib.items().iter().map(|it| it.id).collect();
                 app.lib.click(ids[0]);
                 for &id in ids.iter().take(4).skip(1) {
