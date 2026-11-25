@@ -53,7 +53,8 @@ have a filmstrip. The bar under the view counts the photos and the selection, na
 focused photo, holds the compare switches, and holds the thumbnail size in the grid and
 the zoom in the loupe.
 
-A star marks the photos worth keeping. It shows in the corner of a starred photo's cell,
+A cell names its photo; on macOS the SF Symbol for film beside the name marks a photo
+the process is on for. A star marks the photos worth keeping. It shows in the corner of a starred photo's cell,
 and under the pointer in the corner of any other, where a click stars that photo alone.
 ★ at the left of the bar shows only the starred photos; the arrow keys, ⇧-click and
 Select All then go through those alone. Opening photos shows every photo again.

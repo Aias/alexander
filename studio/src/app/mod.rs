@@ -12,6 +12,8 @@ mod photos;
 mod presets;
 mod session;
 mod shots;
+#[cfg(target_os = "macos")]
+mod symbols;
 mod tiers;
 mod views;
 mod workers;
@@ -149,6 +151,8 @@ pub struct App {
     last_fit: f32,
     /// Library revision and the count of exportable selected photos at it.
     exportable: (u64, usize),
+    /// The mark on a photo with a look: the SF Symbol for film where there is one.
+    film_mark: Option<egui::TextureHandle>,
     presets: Vec<presets::Preset>,
     /// The name of a preset being made, while it is typed.
     new_preset: Option<String>,
@@ -209,6 +213,10 @@ impl App {
             frame_times: VecDeque::new(),
             last_fit: 1.0,
             exportable: (u64::MAX, 0),
+            #[cfg(target_os = "macos")]
+            film_mark: symbols::symbol("film", 28).map(|image| cc.egui_ctx.load_texture("film", image, egui::TextureOptions::LINEAR)),
+            #[cfg(not(target_os = "macos"))]
+            film_mark: None,
             presets: presets::load(),
             new_preset: None,
             preview_wanted: None,

@@ -291,14 +291,14 @@ impl App {
         if named {
             let colour = if selected { TEXT } else { LABEL };
             let y = cell.max.y - name_h / 2.0 - 4.0;
-            let badge = item.look.is_some().then(|| ui.painter().layout_no_wrap("±".into(), FontId::proportional(11.5), LABEL));
-            let badge_w = badge.as_ref().map_or(0.0, |g| g.size().x + 6.0);
+            let mark = self.film_mark.as_ref().filter(|_| item.look.is_some()).map(|t| (t.id(), t.aspect_ratio() * 11.0));
+            let badge_w = mark.map_or(0.0, |(_, w)| w + 6.0);
             let mut job = LayoutJob::simple_singleline(item.title(), FontId::proportional(11.0), colour);
             job.wrap = TextWrapping::truncate_at_width(inner.width() - badge_w);
             let name = ui.fonts(|f| f.layout_job(job));
             ui.painter().galley(pos2(inner.min.x, y - name.size().y / 2.0), name, colour);
-            if let Some(g) = badge {
-                ui.painter().galley(pos2(inner.max.x - g.size().x, y - g.size().y / 2.0), g, LABEL);
+            if let Some((t, w)) = mark {
+                ui.painter().image(t, Rect::from_min_size(pos2(inner.max.x - w, y - 5.5), vec2(w, 11.0)), uv(), LABEL);
             }
         }
         if focused && selected {
