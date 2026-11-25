@@ -382,6 +382,7 @@ fn fs_mip(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 // v2 = (paper colour r, g, b; dither strength)
 // v3 = (first canvas column showing the photo itself, 1 to write display values
 //       unconverted, the column after the last showing it, 1 to mark clipped values)
+// v4 = (cosine and sine of the angle the picture turns clockwise under the canvas)
 // t0 the finished picture with its pyramid, t1 the photo
 
 fn texel(p: vec2<i32>, lvl: i32, src: bool) -> vec3<f32> {
@@ -393,9 +394,16 @@ fn texel(p: vec2<i32>, lvl: i32, src: bool) -> vec3<f32> {
     return vec3<f32>(textureLoad(t0, clamp(p, vec2<i32>(0), size - 1), lvl).r);
 }
 
+// the picture point under canvas position `pos`, the picture turned about its centre
+fn picture_point(pos: vec2<f32>) -> vec2<f32> {
+    let m = 0.5 * vec2<f32>(textureDimensions(t1));
+    let d = u.v[0].xy + pos * u.v[0].z - m;
+    return m + vec2<f32>(u.v[4].x * d.x + u.v[4].y * d.y, u.v[4].x * d.y - u.v[4].y * d.x);
+}
+
 fn sample_picture(pos: vec2<f32>, src: bool) -> vec3<f32> {
     let s = u.v[0].z;
-    let c = u.v[0].xy + pos * s;
+    let c = picture_point(pos);
     if (s <= 0.5) {
         return texel(vec2<i32>(floor(c)), 0, src);          // enlarged twice or more: show the pixels
     }
@@ -432,6 +440,10 @@ fn sample_picture(pos: vec2<f32>, src: bool) -> vec3<f32> {
 
 @fragment
 fn fs_canvas(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let p = picture_point(pos.xy);
+    if (any(p < vec2<f32>(0.0)) || any(p >= vec2<f32>(textureDimensions(t1)))) {
+        return vec4<f32>(0.0);
+    }
     let src = pos.x >= u.v[3].x && pos.x < u.v[3].z;
     let r = sample_picture(pos.xy, src);
     var enc: vec3<f32>;

@@ -3,7 +3,7 @@
 
 use crate::film::{FilmKind, Filter};
 use crate::frame::Area;
-use crate::params::{Frame, Settings};
+use crate::params::{Crop, Frame, Settings};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -80,15 +80,12 @@ impl Item {
         }
     }
 
-    /// The part of the photo shown and exported: the picture area when the look strips the
-    /// border, otherwise None for the whole.
-    pub fn crop(&self) -> Option<Area> {
+    /// The part of the photo shown and exported: the look's crop, else the picture inside the
+    /// border when the look strips it, otherwise None for the whole.
+    pub fn crop(&self) -> Option<Crop> {
         let look = self.look.as_ref()?;
-        if look.frame == Frame::Strip {
-            self.area(look)
-        } else {
-            None
-        }
+        let strip = self.area(look).filter(|_| look.frame == Frame::Strip);
+        look.crop.or(strip.map(|a| Crop { left: a.left, top: a.top, right: a.right, bottom: a.bottom, angle: 0.0 }))
     }
 
     pub fn ready(&self) -> bool {
@@ -632,7 +629,7 @@ macro_rules! sync_fields {
 pub fn sync_changed(before: &Settings, after: &Settings, target: &mut Settings) {
     // keep this list in step with `Settings`: tests/library check every field
     sync_fields!(before, after, target;
-        detail_px, seed, film, frame, film_mm, filter, lens_um, lens_exponent, halation, halation_um,
+        detail_px, seed, film, frame, crop, film_mm, filter, lens_um, lens_exponent, halation, halation_um,
         ev, auto_ev, auto_ev_target, dev, grain, grain_light, grain_dev, edge, edge_density, no_edge,
         grade, print_ev, print_grey, enlarger_um, house,
         copy_blur, copy_gain, copy_drop, copy_fill, copy_ink,

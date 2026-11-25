@@ -113,6 +113,7 @@ fn every_knob_is_carried() {
                 "dev" => serde_json::json!({"Minutes": 9.0}),
                 "page_mm" => serde_json::json!(120.0),
                 "view" => serde_json::json!("Page"),
+                "crop" => serde_json::json!({"left": 0.1, "top": 0.05, "right": 0.9, "bottom": 0.95, "angle": 2.0}),
                 other => panic!("no test value for {other}"),
             },
             serde_json::Value::String(_) => match k.as_str() {

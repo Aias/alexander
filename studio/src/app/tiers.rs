@@ -71,7 +71,7 @@ struct DrawKey {
     /// screen while the new one is made.
     complete: bool,
     gen: u64,
-    canvas: [u32; 6],
+    canvas: [u32; 7],
     size: [u32; 2],
 }
 
@@ -172,7 +172,7 @@ impl Tiers {
 
     /// The part of the full grid a view shows: its top-left corner and size. The picture
     /// inside the border when the look strips it, otherwise the whole grid.
-    pub fn shown(&self, item: &Item) -> ([f32; 2], (u32, u32)) {
+    pub fn shown(&self, item: &Item) -> ([f32; 2], (u32, u32), f32) {
         within(item, self.grid_size(item))
     }
 
@@ -198,7 +198,7 @@ impl Tiers {
     /// some size, maybe an older look) and the size it should be shown at.
     pub fn thumb(&mut self, item: &Item, max: [u32; 2], rank: u8) -> (Option<TextureId>, [u32; 2]) {
         let Some(p) = &item.proxy else { return (None, [0, 0]) };
-        let (_, (pw, ph)) = within(item, (p.w, p.h));
+        let (_, (pw, ph), _) = within(item, (p.w, p.h));
         let s = (max[0] as f32 / pw as f32).min(max[1] as f32 / ph as f32);
         let size = [((pw as f32 * s).round() as u32).clamp(1, pw.max(1) * 2), ((ph as f32 * s).round() as u32).clamp(1, ph.max(1) * 2)];
         self.requests.push(Request { id: item.id, want: Want::Thumb, size, rank });
@@ -553,6 +553,7 @@ impl Tiers {
     /// The finished picture of `item` at its full grid, as display values, for export.
     /// None until the full grid has arrived (it is then asked for).
     pub fn export_pixels(&mut self, item: &Item, planner: &mut Planner) -> Result<Option<Display>, Vec<(Id, u32)>> {
+        let grid = self.grid_size(item);
         let long = self.grid_long(item);
         let Some(look) = &item.look else { return Ok(None) };
         match self.fulls.get_mut(&item.id) {
@@ -563,7 +564,9 @@ impl Tiers {
                 let view = plan.view.clone();
                 res.plan = Some(plan);
                 res.gen = Some(item.gen);
-                Ok(Some(self.engine.read_display(&mut res.photo, &view, 1)))
+                let (origin, (w, h), angle) = within(item, grid);
+                let canvas = Canvas { origin, scale: 1.0, source: Canvas::RENDER, clip: false, angle };
+                Ok(Some((w, h, self.engine.read_canvas(&mut res.photo, &view, &canvas, w, h))))
             }
             _ => {
                 if self.loading.contains(&(item.id, long)) {
@@ -583,19 +586,16 @@ impl Tiers {
         let source = before || item.look.is_none();
         let key = (item.id, item.gen, source);
         if self.histogram.as_ref().is_none_or(|h| h.0 != key) {
-            let p = item.proxy.clone()?;
-            let (w, h, values) = if source {
-                (p.w, p.h, p.rgba.iter().map(|&b| b as f32 / 255.0).collect())
-            } else {
-                self.ensure(Tier::Proxy, item, true, false);
-                let res = self.proxies.get_mut(&item.id)?;
-                let view = Self::view_of(res, item);
-                self.engine.read_display(&mut res.photo, &view, 2)
-            };
-            let [x0, y0, x1, y1] = item.crop().map_or([0, 0, w, h], |a| a.pixels(w, h));
+            item.proxy.as_ref()?;
+            self.ensure(Tier::Proxy, item, true, false);
+            let res = self.proxies.get_mut(&item.id)?;
+            let view = Self::view_of(res, item);
+            let (origin, (w, h), angle) = within(item, res.photo.size());
+            let canvas = Canvas { origin, scale: 2.0, source: if source { Canvas::PHOTO } else { Canvas::RENDER }, clip: false, angle };
+            let values = self.engine.read_canvas(&mut res.photo, &view, &canvas, w.div_ceil(2), h.div_ceil(2));
             let mut bins = vec![0.0; HISTOGRAM_BINS];
-            for i in (y0..y1).flat_map(|y| (x0..x1).map(move |x| 4 * (y * w + x) as usize)) {
-                let luma = 0.2126 * values[i] + 0.7152 * values[i + 1] + 0.0722 * values[i + 2];
+            for v in values.chunks(4).filter(|v| v[3] > 0.0) {
+                let luma = 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
                 bins[(luma.clamp(0.0, 1.0) * (HISTOGRAM_BINS - 1) as f32).round() as usize] += 1.0;
             }
             self.histogram = Some((key, bins));
@@ -620,23 +620,25 @@ fn scaled(canvas: Canvas, pw: u32, grid: (u32, u32), photo: bool) -> Canvas {
     Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, source, ..canvas }
 }
 
-/// The part of a `size` picture of `item` that is shown: top-left corner and size.
-fn within(item: &Item, size: (u32, u32)) -> ([f32; 2], (u32, u32)) {
+/// The part of a `size` picture of `item` that is shown: the top-left corner and size of its
+/// frame in the picture's pixels, and the angle in radians the picture turns under it.
+fn within(item: &Item, size: (u32, u32)) -> ([f32; 2], (u32, u32), f32) {
     match item.crop() {
-        Some(a) => {
-            let [x0, y0, x1, y1] = a.pixels(size.0, size.1);
-            ([x0 as f32, y0 as f32], ((x1 - x0).max(1), (y1 - y0).max(1)))
+        Some(c) => {
+            let at = |f: f64, n: u32| (f * n as f64).round().clamp(0.0, n as f64) as u32;
+            let (x0, y0, x1, y1) = (at(c.left, size.0), at(c.top, size.1), at(c.right, size.0), at(c.bottom, size.1));
+            ([x0 as f32, y0 as f32], ((x1 - x0).max(1), (y1 - y0).max(1)), c.angle.to_radians() as f32)
         }
-        None => ([0.0, 0.0], size),
+        None => ([0.0, 0.0], size, 0.0),
     }
 }
 
 /// A thumbnail of `size` drawn from the proxy, of `proxy` pixels.
 fn thumb_canvas(item: &Item, proxy: (u32, u32), size: [u32; 2], source: bool) -> Canvas {
-    let (origin, (w, _)) = within(item, proxy);
-    Canvas { origin, scale: w as f32 / size[0] as f32, source: if source { Canvas::PHOTO } else { Canvas::RENDER }, clip: false }
+    let (origin, (w, _), angle) = within(item, proxy);
+    Canvas { origin, scale: w as f32 / size[0] as f32, source: if source { Canvas::PHOTO } else { Canvas::RENDER }, clip: false, angle }
 }
 
-fn canvas_bits(c: &Canvas) -> [u32; 6] {
-    [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits(), c.source[0].to_bits(), c.source[1].to_bits(), c.clip as u32]
+fn canvas_bits(c: &Canvas) -> [u32; 7] {
+    [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits(), c.source[0].to_bits(), c.source[1].to_bits(), c.clip as u32, c.angle.to_bits()]
 }

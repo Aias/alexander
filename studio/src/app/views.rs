@@ -434,12 +434,12 @@ impl App {
             }
             let inner = cell.shrink(8.0);
             let b = px(inner, ppp);
-            let (origin, (gw, gh)) = self.tiers.shown(item);
+            let (origin, (gw, gh), angle) = self.tiers.shown(item);
             let z = ((b[2] - b[0]) as f32 / gw as f32).min((b[3] - b[1]) as f32 / gh as f32);
             let (iw, ih) = (((gw as f32 * z).round() as u32).max(1), ((gh as f32 * z).round() as u32).max(1));
             let img = centred(inner, iw, ih, ppp);
             let focused = self.lib.focus == Some(id);
-            let canvas = Canvas { origin, scale: gw as f32 / iw as f32, source: self.split_source(iw), clip: self.clipping };
+            let canvas = Canvas { origin, scale: gw as f32 / iw as f32, source: self.split_source(iw), clip: self.clipping, angle };
             let tex = self.tiers.canvas(item, canvas, [iw, ih], if focused { 0 } else { 1 }).or_else(|| self.tiers.thumb_tex(id));
             if let Some(t) = tex {
                 ui.painter().image(t, img, uv(), Color32::WHITE);
@@ -471,7 +471,7 @@ impl App {
         let vp = px(rect, ppp);
         let (vw, vh) = ((vp[2] - vp[0]) as f32, (vp[3] - vp[1]) as f32);
         // positions below are within the part shown; `origin` places it on the full grid
-        let (origin, (gw, gh)) = self.tiers.shown(item);
+        let (origin, (gw, gh), angle) = self.tiers.shown(item);
         let (gwf, ghf) = (gw as f32, gh as f32);
         let fit = (vw / gwf).min(vh / ghf);
         self.last_fit = fit;
@@ -526,7 +526,7 @@ impl App {
             return;
         }
         let shown = from_px([x0, y0, x1, y1], ppp);
-        let canvas = Canvas { origin: [origin[0] + c[0] + (x0 as f32 - vc[0]) / z, origin[1] + c[1] + (y0 as f32 - vc[1]) / z], scale: 1.0 / z, source: self.split_source((x1 - x0) as u32), clip: self.clipping };
+        let canvas = Canvas { origin: [origin[0] + c[0] + (x0 as f32 - vc[0]) / z, origin[1] + c[1] + (y0 as f32 - vc[1]) / z], scale: 1.0 / z, source: self.split_source((x1 - x0) as u32), clip: self.clipping, angle };
         if let Some(pos) = self.lib.shown_position(id) {
             for j in [pos + 1, pos.wrapping_sub(1)] {
                 if let Some(next) = self.lib.shown().get(j).and_then(|&n| self.lib.get(n)) {
@@ -540,8 +540,7 @@ impl App {
         } else if let Some(t) = self.tiers.thumb_tex(item.id) {
             // the photo's thumbnail (its shown part), placed where the photo is and cut to the view
             let full = Rect::from_min_max(pos2((vc[0] - c[0] * z) / ppp, (vc[1] - c[1] * z) / ppp), pos2((vc[0] + (gwf - c[0]) * z) / ppp, (vc[1] + (ghf - c[1]) * z) / ppp));
-            let part = item.crop().map_or(uv(), |a| Rect::from_min_max(pos2(a.left as f32, a.top as f32), pos2(a.right as f32, a.bottom as f32)));
-            ui.painter().with_clip_rect(rect).image(t, full, part, Color32::WHITE);
+            ui.painter().with_clip_rect(rect).image(t, full, uv(), Color32::WHITE);
         }
         self.divider(ui, id, shown, true);
     }

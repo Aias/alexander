@@ -623,12 +623,8 @@ impl App {
             }
             Ok(Some((w, h, rgba))) => {
                 run.queue.pop_front();
-                let mut pic = export::Picture { w, h, rgba };
-                let mut original_long = item.original.0.max(item.original.1);
-                if let Some(a) = item.crop() {
-                    pic = pic.crop(&a);
-                    original_long = export::cropped_long((pic.w, pic.h), (w, h), original_long);
-                }
+                let pic = export::Picture { w, h, rgba };
+                let original_long = export::cropped_long((w, h), self.tiers.grid_size(item), item.original.0.max(item.original.1));
                 let lib = &self.lib;
                 let claimed = &run.claimed;
                 let path = export::output_path(&run.form.dir, &item.path, run.form.format, &|p| claimed.contains(p) || lib.find_path(p).is_some());
@@ -684,12 +680,8 @@ impl App {
         };
         match self.tiers.export_pixels(item, planner) {
             Ok(Some((w, h, rgba))) => {
-                let mut pic = export::Picture { w, h, rgba };
-                if let Some(a) = item.crop() {
-                    pic = pic.crop(&a);
-                }
-                let bytes: Vec<u8> = pic.rgba.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8).collect();
-                ctx.copy_image(egui::ColorImage::from_rgba_unmultiplied([pic.w as usize, pic.h as usize], &bytes));
+                let bytes: Vec<u8> = rgba.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8).collect();
+                ctx.copy_image(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &bytes));
                 self.copy_image = None;
             }
             Ok(None) => self.copy_image = None,
