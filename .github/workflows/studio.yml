@@ -6,7 +6,9 @@ on:
       - "studio/**"
       - "data/**"
       - ".github/workflows/studio.yml"
+  # Branches with a pull request are already covered by the pull_request event.
   push:
+    branches: [main]
     paths:
       - "studio/**"
       - "data/**"
@@ -67,7 +69,7 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Test
-        run: cargo test --locked
+        run: cargo test --locked -- --nocapture
 
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
@@ -99,7 +101,7 @@ jobs:
       # The render tests use Metal when the runner's virtual machine exposes a
       # GPU and skip themselves with a note when it does not.
       - name: Test
-        run: cargo test --locked
+        run: cargo test --locked -- --nocapture
 
       - name: Bundle
         run: macos/bundle.sh
