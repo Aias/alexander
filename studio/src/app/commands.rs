@@ -45,6 +45,8 @@ pub enum Command {
     StarredOnly,
     Panel,
     Reference,
+    /// Start cropping the focused photo, or give it the crop drawn.
+    Crop,
 }
 
 impl App {
@@ -61,6 +63,7 @@ impl App {
             #[cfg(target_os = "macos")]
             Command::ShowInFinder => selected,
             Command::View(Mode::Loupe) => focus.is_some(),
+            Command::Crop => self.cropping.is_some() || self.lib.selected().len() == 1 && focus.is_some_and(|it| it.ready() && it.look.is_some()),
             Command::Swap => self.compare == Compare::Split,
             Command::Zoom(_) => self.mode != Mode::Survey,
             Command::Fit | Command::Actual => self.mode == Mode::Loupe,
@@ -141,6 +144,13 @@ impl App {
             Command::StarredOnly => self.lib.set_starred_only(!self.lib.starred_only()),
             Command::Panel => self.panel = !self.panel,
             Command::Reference => self.reference.shown = !self.reference.shown,
+            Command::Crop => {
+                if self.cropping.is_some() {
+                    self.finish_crop();
+                } else {
+                    self.start_crop();
+                }
+            }
         }
     }
 }

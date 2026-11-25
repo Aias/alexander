@@ -37,6 +37,7 @@ impl App {
             ui.add_enabled_ui(enabled, |ui| {
                 self.presets_ui(ui);
                 knobs(ui, &mut s);
+                self.crop_ui(ui);
             });
         });
         if enabled && s != before {
@@ -180,7 +181,7 @@ fn name(ui: &mut Ui, label: &str, tip: &str, changed: bool) -> bool {
 
 /// A labelled slider and its value. Clicking the name or double-clicking the slider
 /// restores the default; the value can be dragged or typed, past the slider's ends too.
-fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize) {
+pub(super) fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize) {
     ui.horizontal(|ui| {
         let reset = name(ui, label, tip, *v != default);
         let speed = (range.end() - range.start()) / 300.0;
@@ -196,7 +197,7 @@ fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<
 }
 
 /// A named row of controls; true when the name was clicked to restore the default.
-fn row(ui: &mut Ui, label: &str, tip: &str, changed: bool, add: impl FnOnce(&mut Ui)) -> bool {
+pub(super) fn row(ui: &mut Ui, label: &str, tip: &str, changed: bool, add: impl FnOnce(&mut Ui)) -> bool {
     ui.horizontal(|ui| {
         let reset = name(ui, label, tip, changed);
         add(ui);
@@ -215,7 +216,7 @@ fn toggles<T: PartialEq + Copy>(ui: &mut Ui, label: &str, tip: &str, v: &mut T, 
     }
 }
 
-fn combo<T: PartialEq + Copy>(ui: &mut Ui, id: &str, v: &mut T, options: &[(T, &str)]) {
+pub(super) fn combo<T: PartialEq + Copy>(ui: &mut Ui, id: &str, v: &mut T, options: &[(T, &str)]) {
     let current = options.iter().find(|o| o.0 == *v).map_or("", |o| o.1);
     ComboBox::from_id_salt(id).width(ui.available_width()).selected_text(current).show_ui(ui, |ui| {
         for (o, name) in options {

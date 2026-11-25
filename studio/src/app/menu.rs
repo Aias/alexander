@@ -82,6 +82,7 @@ impl MenuBar {
         let photo = submenu("Photo", &[
                 &b.check("Star", key(PLAIN, Code::KeyS), Command::Star, |a| a.lib.focus.and_then(|id| a.lib.get(id)).is_some_and(|it| it.starred)),
                 &b.check("Film", key(PLAIN, Code::KeyV), Command::Process(None), |a| a.lib.focus.and_then(|id| a.lib.get(id)).is_some_and(|it| it.look.is_some())),
+                &b.check("Crop", key(PLAIN, Code::KeyR), Command::Crop, |a| a.cropping.is_some()),
                 &b.item("Create Virtual Copy", key(CMD, Code::Quote), Command::VirtualCopy),
                 &b.item("Copy Image", None, Command::CopyImage),
                 &b.item("Show in Finder", key(CMD, Code::KeyR), Command::ShowInFinder),

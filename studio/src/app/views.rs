@@ -457,6 +457,10 @@ impl App {
         let resp = ui.interact(rect, egui::Id::new("loupe"), Sense::click_and_drag());
         let Some(id) = self.lib.focus else { return };
         self.photo_menu(&resp, id);
+        if self.cropping.as_ref().is_some_and(|e| e.id == id) {
+            self.crop_view(ui, rect);
+            return;
+        }
         let Some(item) = self.lib.get(id) else { return };
         if !item.ready() {
             return;

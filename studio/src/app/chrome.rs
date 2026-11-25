@@ -65,14 +65,14 @@ impl App {
                     controls::slider(ui, &mut size, 80.0..=480.0, 110.0).on_hover_text("⌘+ / ⌘−");
                     self.thumb_pt = size as f32;
                 }
-                Mode::Loupe => {
+                Mode::Loupe if self.cropping.is_none() => {
                     if self.zoom != Some(1.0) {
                         ui.label(RichText::new(format!("{:.0}%", self.current_zoom() * 100.0)).color(LABEL));
                     }
                     self.switch(ui, self.zoom == Some(1.0), "100%", "⌘1", Command::Actual);
                     self.switch(ui, self.zoom.is_none(), "Fit", "⌘0", Command::Fit);
                 }
-                Mode::Survey => {}
+                _ => {}
             }
             ui.add_space(8.0);
             if self.compare == Compare::Split {

@@ -107,6 +107,7 @@ the menu; plain keys go to the window, which leaves them to text being typed.
 | \\ | Before |
 | Y | Split before and after |
 | J | Mark clipped highlights red and clipped shadows blue |
+| R | Crop the focused photo; Return or R again keeps the crop, Esc leaves it |
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |
 | ⇧⌘R | Reset the film settings of the selection to the defaults |
 | ⌘Z / ⇧⌘Z | Undo and redo changes to looks |
@@ -122,6 +123,16 @@ the paper of a photographed print or letterbox bars, found when the photo is ope
 `twb2.py --frame` finds it. Keep (the default) measures exposure and tones inside the
 border and leaves it in the picture; Strip does the same and shows and exports only the
 picture inside, in every view and thumbnail, without rendering again; Off does not look.
+
+Crop (R, or the Crop section at the foot of the panel) works on one photo at a time, in
+the loupe. It shows the whole photo with a level frame over it: drag the frame or its
+handles, and Straighten turns the photo under the frame, up to 45° either way. The frame
+keeps the photo's own aspect unless another one is chosen, or Free, and never leaves the
+photo, shrinking when a turn would take a corner off it. Return, R or Done keeps the crop
+as one step undo takes back; Esc or Cancel leaves the photo as it was. The crop is part of
+the look, so exports, thumbnails and the histogram show it, but presets and pasted looks
+leave each photo's own crop alone, and Reset takes it away. A stripped border is a crop
+of the picture inside it, at no angle.
 
 Presets head the panel. Resting the pointer on one shows it on the focused photo, and a
 click gives it to every selected photo, in one step that undo takes back. Four come with

@@ -3,6 +3,7 @@
 mod chrome;
 mod commands;
 mod controls;
+mod crop;
 #[cfg(target_os = "macos")]
 pub mod finder;
 #[cfg(target_os = "macos")]
@@ -157,6 +158,8 @@ pub struct App {
     film_mark: Option<egui::TextureHandle>,
     presets: Vec<presets::Preset>,
     reference: reference::Reference,
+    /// A crop being drawn on the focused photo in the loupe.
+    cropping: Option<crop::CropEdit>,
     /// The name of a preset being made, while it is typed.
     new_preset: Option<String>,
     /// The preset under the pointer this frame, to show on the focused photo.
@@ -222,6 +225,7 @@ impl App {
             film_mark: None,
             presets: presets::load(),
             reference: reference::Reference::default(),
+            cropping: None,
             new_preset: None,
             preview_wanted: None,
             #[cfg(target_os = "macos")]
@@ -428,10 +432,14 @@ impl App {
         self.lib.focus.and_then(|f| self.lib.get(f)).and_then(|it| it.look.as_ref())
     }
 
+    /// Give the selected photos `look`, each keeping its own crop.
     fn set_looks(&mut self, look: Settings) {
         let ids = self.lib.selection();
         self.lib.checkpoint(&ids);
-        self.lib.set_look(&ids, Some(look));
+        for id in ids {
+            let crop = self.lib.get(id).and_then(|it| it.look.as_ref()).and_then(|l| l.crop);
+            self.lib.set_look(&[id], Some(Settings { crop, ..look.clone() }));
+        }
     }
 
     fn copy_look(&mut self, ctx: &egui::Context) {
@@ -492,6 +500,14 @@ impl App {
             self.paste_look(Some(&t));
         }
         let k = |m: Modifiers, key: Key| ctx.input_mut(|i| i.consume_key(m, key));
+        if self.cropping.is_some() {
+            if k(none, Key::Enter) {
+                self.finish_crop();
+            }
+            if k(none, Key::Escape) {
+                self.cropping = None;
+            }
+        }
         // shifted keys first: a key asked for without shift is also pressed with it
         let mut keyed = vec![
             (cmd_shift, Key::E, Command::Export),
@@ -516,6 +532,7 @@ impl App {
             (none, Key::Backslash, Command::Compare(Compare::Before)),
             (none, Key::Y, Command::Compare(Compare::Split)),
             (none, Key::J, Command::Clipping),
+            (none, Key::R, Command::Crop),
             (none, Key::S, Command::Star),
             (none, Key::V, Command::Process(None)),
             (none, Key::Delete, Command::Remove),
@@ -745,6 +762,9 @@ impl eframe::App for App {
         self.keys(ctx);
         let actions = self.layout(ctx);
         self.tiers.set_preview(self.preview_wanted.take());
+        if self.cropping.as_ref().is_some_and(|e| self.lib.focus != Some(e.id) || self.mode != Mode::Loupe) {
+            self.finish_crop();
+        }
         #[cfg(target_os = "macos")]
         if let Some(mut menu) = menu {
             menu.sync(self);
