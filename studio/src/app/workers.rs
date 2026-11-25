@@ -15,14 +15,14 @@ pub enum Job {
     Collect(Vec<PathBuf>),
     Open { id: Id, path: PathBuf },
     Full { id: Id, path: PathBuf, long: u32 },
-    Encode { task: u64, pic: Picture, size: Size, original_long: u32, format: Format, record: Record, path: PathBuf },
+    Encode { pic: Box<Picture>, size: Size, original_long: u32, format: Format, record: Box<Record>, path: PathBuf },
 }
 
 pub enum Done {
     Collected(Vec<PathBuf>),
-    Opened { id: Id, result: Result<Opened, String> },
+    Opened { id: Id, result: Result<Box<Opened>, String> },
     Full { id: Id, long: u32, result: Result<Pixels, String> },
-    Encoded { task: u64, path: PathBuf, result: Result<(), String> },
+    Encoded { path: PathBuf, result: Result<(), String> },
 }
 
 #[derive(Default)]
@@ -105,11 +105,11 @@ fn run(shared: Arc<(Mutex<Queues>, Condvar)>, tx: Sender<Done>, wake: Arc<dyn Fn
         };
         let done = match job {
             Job::Collect(paths) => Done::Collected(load::collect(&paths)),
-            Job::Open { id, path } => Done::Opened { id, result: load::open(&path) },
+            Job::Open { id, path } => Done::Opened { id, result: load::open(&path).map(Box::new) },
             Job::Full { id, path, long } => Done::Full { id, long, result: load::full(&path, long) },
-            Job::Encode { task, pic, size, original_long, format, record, path } => {
+            Job::Encode { pic, size, original_long, format, record, path } => {
                 let result = export::write(&pic, size, original_long, format, &record, &path);
-                Done::Encoded { task, path, result }
+                Done::Encoded { path, result }
             }
         };
         if tx.send(done).is_err() {

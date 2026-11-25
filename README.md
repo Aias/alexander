@@ -61,6 +61,11 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 The research behind every stage, its sources and the decisions taken are written up in
 [docs/RESEARCH.md](docs/RESEARCH.md).
 
+## Studio
+
+`studio/` holds Alexander Studio, a desktop app that runs the same simulation live on the GPU
+over a library of photos; see [studio/README.md](studio/README.md).
+
 ## What each stage does
 
 1. **Colour response.** The photo is weighted by Tri-X's spectral sensitivity, which is

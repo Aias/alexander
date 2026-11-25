@@ -151,7 +151,7 @@ impl Planner {
                 v
             }
         };
-        if self.paper.as_ref().map_or(true, |p| p.0 != s.grade.to_bits()) {
+        if self.paper.as_ref().is_none_or(|p| p.0 != s.grade.to_bits()) {
             self.paper = Some((s.grade.to_bits(), Paper::new(s.grade)));
         }
         let film = self.films.iter().find(|f| f.0 == s.film).unwrap().1.clone();
@@ -380,12 +380,12 @@ pub fn soften(lens: f64, n_lens: f64, emul: f64, n_emul: f64, max_sigma: f64) ->
             }
         }
         for &(s, _) in &parts {
-            if s >= 0.15 && s < FULL_RES_SIGMA {
+            if (0.15..FULL_RES_SIGMA).contains(&s) {
                 taps += 2 * ((3.5 * s + 0.5) as usize) + 1;
             }
         }
         let score = err + 0.001 * taps as f64;
-        if best.as_ref().map_or(true, |b| score < b.0) {
+        if best.as_ref().is_none_or(|b| score < b.0) {
             best = Some((score, parts));
         }
     }
@@ -425,11 +425,13 @@ fn nnls(g: &[Vec<f64>], h: &[f64]) -> Vec<f64> {
         for c in 0..k {
             let p = (c..k).max_by(|&i, &j| a[i][c].abs().partial_cmp(&a[j][c].abs()).unwrap()).unwrap();
             a.swap(c, p);
-            for r in 0..k {
-                if r != c && a[c][c] != 0.0 {
-                    let f = a[r][c] / a[c][c];
-                    for q in c..=k {
-                        a[r][q] -= f * a[c][q];
+            // row c is not changed while the others are reduced by it
+            let pivot = a[c][c..=k].to_vec();
+            for (r, row) in a.iter_mut().enumerate().take(k) {
+                if r != c && pivot[0] != 0.0 {
+                    let f = row[c] / pivot[0];
+                    for (v, pv) in row[c..=k].iter_mut().zip(&pivot) {
+                        *v -= f * pv;
                     }
                 }
             }

@@ -65,7 +65,7 @@ fn decode_with_image(path: &Path) -> Result<Pixels, String> {
     img.apply_orientation(orientation);
     let gray = matches!(img.color(), image::ColorType::L8 | image::ColorType::L16 | image::ColorType::La8 | image::ColorType::La16);
     let mut rgba = img.into_rgba8();
-    for p in rgba.chunks_exact_mut(4) {
+    for p in rgba.as_chunks_mut::<4>().0 {
         p[3] = 255;
     }
     if let (Some(icc), false) = (icc, gray) {

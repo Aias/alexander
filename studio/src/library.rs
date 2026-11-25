@@ -338,19 +338,24 @@ impl Library {
     }
 
     /// Switch the process on for all of `ids` when any is off, otherwise off for all.
-    /// A look switched off is kept and comes back when switched on again.
     pub fn toggle_process(&mut self, ids: &[Id]) {
         let any_off = ids.iter().any(|&id| self.get(id).is_some_and(|it| it.look.is_none()));
+        self.set_process(ids, any_off);
+    }
+
+    /// Switch the process on or off. A look switched off is kept and comes back when it is
+    /// switched on again; a photo never processed starts from the defaults.
+    pub fn set_process(&mut self, ids: &[Id], on: bool) {
         for &id in ids {
             if let Some(it) = self.get_mut(id) {
-                if any_off {
-                    if it.look.is_none() {
-                        it.look = Some(it.stash.take().unwrap_or_default());
+                if on && it.look.is_none() {
+                    it.look = Some(it.stash.take().unwrap_or_default());
+                    it.gen += 1;
+                } else if !on {
+                    if let Some(l) = it.look.take() {
+                        it.stash = Some(l);
                         it.gen += 1;
                     }
-                } else if let Some(l) = it.look.take() {
-                    it.stash = Some(l);
-                    it.gen += 1;
                 }
             }
         }
@@ -373,11 +378,6 @@ pub fn sync_changed(before: &Settings, after: &Settings, target: &mut Settings) 
         copy_blur, copy_gain, copy_drop, copy_fill, copy_ink,
         repro, page_mm, ppi, lpi, ink_density, dot_gain, min_dot, copy_blur_mm, paper_scatter_mm,
         view, scan_black, scan_white);
-}
-
-/// The filter a look's colour response comes from, as an index for `Levels`.
-pub fn levels_key(s: &Settings) -> (usize, usize) {
-    (film_index(s.film), s.filter as usize)
 }
 
 pub fn all_weightings() -> impl Iterator<Item = (FilmKind, Filter)> {

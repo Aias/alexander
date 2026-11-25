@@ -413,7 +413,7 @@ impl Engine {
                     self.gpu.submit(enc);
                     enc = self.gpu.encoder();
                     let bytes = self.gpu.read(&small, 4);
-                    let values: Vec<f32> = bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+                    let values: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
                     self.give(small);
                     let p = tone::percentiles(&values, &HOUSE_PCT);
                     let p = [p[0], p[1], p[2], p[3], p[4]];
@@ -502,9 +502,7 @@ impl Engine {
                 }
             }
         };
-        let Some(first) = first else {
-            return None;
-        };
+        let first = first?;
         if photo.cache.is_none() {
             photo.cache = Some(Cache {
                 plan: plan.clone(),
@@ -611,7 +609,7 @@ impl Engine {
         self.draw(photo, view, &Canvas { origin: [0.0, 0.0], scale: 1.0, show_source: false }, &target.view, Format::Rgba32Float, true);
         let bytes = self.gpu.read(&target, 16);
         self.give(target);
-        (w, h, bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+        (w, h, bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
     }
 }
 

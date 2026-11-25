@@ -281,7 +281,7 @@ impl Gpu {
         let row = t.w * bytes_per_px;
         let padded = row.div_ceil(256) * 256;
         let size = padded as u64 * t.h as u64;
-        if self.readback.as_ref().map_or(true, |b| b.0 < size) {
+        if self.readback.as_ref().is_none_or(|b| b.0 < size) {
             let buffer = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("readback"), size, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
             self.readback = Some((size, buffer));
         }

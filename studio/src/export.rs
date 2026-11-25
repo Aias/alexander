@@ -87,13 +87,13 @@ pub fn encode(pic: &Picture, size: Size, original_long: u32, format: Format, rec
         Size::LongEdge(l) => l.max(1),
     };
     let (nw, nh) = crate::resize::fit_long(w, h, long);
-    let neutral = pic.rgba.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2]);
+    let neutral = pic.rgba.as_chunks::<4>().0.iter().all(|p| p[0] == p[1] && p[1] == p[2]);
     let channels = if neutral { 1 } else { 3 };
     let clip = |v: f32| v.clamp(0.0, 1.0);
     let planes: Vec<f32> = if neutral {
-        pic.rgba.chunks_exact(4).map(|p| clip(p[1])).collect()
+        pic.rgba.as_chunks::<4>().0.iter().map(|p| clip(p[1])).collect()
     } else {
-        pic.rgba.chunks_exact(4).flat_map(|p| [clip(p[0]), clip(p[1]), clip(p[2])]).collect()
+        pic.rgba.as_chunks::<4>().0.iter().flat_map(|p| [clip(p[0]), clip(p[1]), clip(p[2])]).collect()
     };
     let values: Vec<f32> = crate::resize::f32s(&planes, w, h, nw, nh, channels).into_iter().map(clip).collect();
     let json = record.to_json();

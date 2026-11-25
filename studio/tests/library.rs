@@ -190,6 +190,28 @@ fn opening_turns_upright_and_makes_a_proxy() {
     assert_eq!((full.w, full.h), (2560, 1440));
     assert_eq!(load::grid_long(0, (1600, 900), 16384), 1600);
     assert_eq!(load::grid_long(0, (30000, 900), 16384), 16384);
-    assert_eq!(load::collect(&[dir.clone()]), vec![p]);
+    assert_eq!(load::collect(std::slice::from_ref(&dir)), vec![p]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn exif_orientation_is_honoured() {
+    let dir = std::env::temp_dir().join(format!("studio-exif-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("sideways.jpg");
+    // stored 40 wide and 80 tall, bright at the top; orientation 6 asks for a quarter turn clockwise
+    let (w, h) = (40u16, 80u16);
+    let px: Vec<u8> = (0..h as usize).flat_map(|y| (0..w as usize).flat_map(move |_| if y < 20 { [250, 250, 250] } else { [10, 10, 10] })).collect();
+    let mut out = Vec::new();
+    let mut enc = jpeg_encoder::Encoder::new(&mut out, 95);
+    let tiff = [b'I', b'I', 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0];
+    enc.add_exif_metadata(&tiff).unwrap();
+    enc.encode(&px, w, h, jpeg_encoder::ColorType::Rgb).unwrap();
+    std::fs::write(&p, out).unwrap();
+    let o = load::open(&p).unwrap();
+    assert_eq!(o.original, (80, 40));
+    // the top of the stored picture is now on the right
+    let at = |x: u32, y: u32| o.proxy.rgba[((y * o.proxy.w + x) * 4) as usize];
+    assert!(at(o.proxy.w - 2, 20) > 200 && at(1, 20) < 60);
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -45,6 +45,7 @@ dependencies = [
  "bytemuck",
  "eframe",
  "egui",
+ "egui-wgpu",
  "fast_image_resize",
  "image",
  "jpeg-encoder",

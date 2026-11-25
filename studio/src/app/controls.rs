@@ -6,7 +6,8 @@ use alexander_studio::params::{Repro, Settings, View};
 use egui::{ComboBox, Label, RichText, Sense, Slider, Ui};
 
 pub enum Action {
-    Process(bool),
+    /// None switches it over; otherwise on or off.
+    Process(Option<bool>),
     CopyLook,
     PasteLook,
     Reset,
@@ -18,11 +19,20 @@ pub enum Action {
 const LABEL_W: f32 = 96.0;
 const VALUE_W: f32 = 46.0;
 
+fn label_cell(ui: &mut Ui, label: &str, sense: Sense) -> egui::Response {
+    let size = egui::vec2(LABEL_W, ui.spacing().interact_size.y);
+    ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_min_size(size);
+        ui.add(Label::new(RichText::new(label).weak()).sense(sense).truncate())
+    })
+    .inner
+}
+
 /// A labelled slider. Double-clicking the label or the slider restores the default.
 #[allow(clippy::too_many_arguments)]
 fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: std::ops::RangeInclusive<f64>, default: f64, decimals: usize) {
     ui.horizontal(|ui| {
-        let l = ui.add_sized([LABEL_W, ui.spacing().interact_size.y], Label::new(RichText::new(label).weak()).sense(Sense::click()).truncate());
+        let l = label_cell(ui, label, Sense::click());
         let l = if tip.is_empty() { l } else { l.on_hover_text(tip) };
         ui.spacing_mut().slider_width = (ui.available_width() - VALUE_W - ui.spacing().item_spacing.x).max(40.0);
         let r = ui.add(Slider::new(v, range).max_decimals(decimals).min_decimals(decimals).trailing_fill(true).clamping(egui::SliderClamping::Never));
@@ -34,7 +44,7 @@ fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: std::ops::Range
 
 fn row(ui: &mut Ui, label: &str, tip: &str, add: impl FnOnce(&mut Ui)) {
     ui.horizontal(|ui| {
-        let l = ui.add_sized([LABEL_W, ui.spacing().interact_size.y], Label::new(RichText::new(label).weak()).truncate());
+        let l = label_cell(ui, label, Sense::hover());
         if !tip.is_empty() {
             l.on_hover_text(tip);
         }
@@ -66,7 +76,7 @@ pub fn header(ui: &mut Ui, processed: bool, can_paste: bool, actions: &mut Vec<A
         ui.selectable_value(&mut on, false, "Original").on_hover_text("V");
         ui.selectable_value(&mut on, true, "Film").on_hover_text("V");
         if on != processed {
-            actions.push(Action::Process(on));
+            actions.push(Action::Process(Some(on)));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.menu_button("…", |ui| {

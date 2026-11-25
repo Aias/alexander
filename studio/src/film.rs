@@ -290,7 +290,7 @@ pub fn contrast_index(cx: &[f64], cy: &[f64]) -> f64 {
         k += 1;
         if let (Some(a), Some(b)) = (hit(c, 0.2), hit(c, 2.2)) {
             let err = ((a.1 - base).atan2(a.0 - c) - (b.1 - base).atan2(b.0 - c)).abs();
-            if best.map_or(true, |bst| err < bst.0) {
+            if best.is_none_or(|bst| err < bst.0) {
                 best = Some((err, (b.1 - base) / (b.0 - c)));
             }
         }

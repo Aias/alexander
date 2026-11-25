@@ -111,6 +111,7 @@ pub struct Tiers {
     thumbs: HashMap<Id, Surface>,
     canvases: HashMap<Id, Surface>,
     requests: Vec<Request>,
+    prefetch: Vec<(Id, u32)>,
     /// Full grids asked of the loaders and not yet arrived: photo and long edge.
     pub loading: HashSet<(Id, u32)>,
     frame: u64,
@@ -135,6 +136,7 @@ impl Tiers {
             thumbs: HashMap::new(),
             canvases: HashMap::new(),
             requests: Vec::new(),
+            prefetch: Vec::new(),
             loading: HashSet::new(),
             frame: 1,
             last_focus_stage: None,
@@ -177,6 +179,19 @@ impl Tiers {
         let grid = self.grid_size(item);
         self.requests.push(Request { id: item.id, want: Want::Canvas { canvas, grid }, size, rank });
         self.canvases.get(&item.id).filter(|t| t.key.is_some()).map(|t| t.id)
+    }
+
+    /// A thumbnail already drawn, to stand in while a larger picture is made.
+    pub fn thumb_tex(&self, id: Id) -> Option<TextureId> {
+        self.thumbs.get(&id).filter(|t| t.key.is_some()).map(|t| t.id)
+    }
+
+    /// Load the full grid of a photo likely to be shown next, without rendering it.
+    pub fn prefetch(&mut self, item: &Item) {
+        if item.ready() {
+            let long = self.grid_long(item);
+            self.prefetch.push((item.id, long));
+        }
     }
 
     // ---------- loading ------------------------------------------------------------------
@@ -262,6 +277,13 @@ impl Tiers {
                     }
                     self.draw_canvas(item, tier, canvas, grid, r.size, before);
                 }
+            }
+        }
+        for (id, long) in std::mem::take(&mut self.prefetch) {
+            let have = self.fulls.get(&id).is_some_and(|f| f.photo.size().0.max(f.photo.size().1) == long);
+            let room = full_bytes + 2 * (long as u64 * long as u64 * 14) < FULL_BUDGET;
+            if !have && room && !self.loading.contains(&(id, long)) && !to_load.contains(&(id, long)) {
+                to_load.push((id, long));
             }
         }
         self.evict();
@@ -441,7 +463,7 @@ impl Tiers {
 
     /// The finished picture of `item` at its full grid, as display values, for export.
     /// None until the full grid has arrived (it is then asked for).
-    pub fn export_pixels(&mut self, item: &Item, planner: &mut Planner) -> Result<Option<(u32, u32, Vec<f32>)>, Vec<(Id, u32)>> {
+    pub fn export_pixels(&mut self, item: &Item, planner: &mut Planner) -> Result<Option<Display>, Vec<(Id, u32)>> {
         let long = self.grid_long(item);
         let Some(look) = &item.look else { return Ok(None) };
         match self.fulls.get_mut(&item.id) {
@@ -471,6 +493,9 @@ impl Tiers {
         (self.proxies.len(), self.fulls.len(), self.thumbs.len(), self.canvases.len())
     }
 }
+
+/// Width, height and display values, four floats a pixel.
+pub type Display = (u32, u32, Vec<f32>);
 
 fn canvas_bits(c: &Canvas) -> [u32; 3] {
     [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits()]
