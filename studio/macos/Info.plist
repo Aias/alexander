@@ -50,6 +50,20 @@
 				<string>public.tiff</string>
 				<string>public.heic</string>
 				<string>org.webmproject.webp</string>
+				<string>com.microsoft.bmp</string>
+				<string>public.camera-raw-image</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Folder</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
 			</array>
 		</dict>
 	</array>

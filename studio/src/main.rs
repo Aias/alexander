@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 fn main() -> eframe::Result {
     let paths: Vec<std::path::PathBuf> = std::env::args_os().skip(1).map(Into::into).collect();
+    #[cfg(target_os = "macos")]
+    app::finder::listen();
     let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
     if let egui_wgpu::WgpuSetup::CreateNew(create) = &mut wgpu_options.wgpu_setup {
         create.device_descriptor = Arc::new(|adapter: &wgpu::Adapter| {

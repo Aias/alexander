@@ -4,6 +4,8 @@ mod chrome;
 mod commands;
 mod controls;
 #[cfg(target_os = "macos")]
+pub mod finder;
+#[cfg(target_os = "macos")]
 mod menu;
 #[cfg(target_os = "macos")]
 mod photos;
@@ -175,6 +177,8 @@ impl App {
         let workers = Workers::new(move || ctx.request_repaint());
         let shots = shots::Shots::from_env(paths.clone());
         let remember = shots.is_none();
+        #[cfg(target_os = "macos")]
+        finder::wake(&cc.egui_ctx);
         let mut app = App {
             lib: Library::new(),
             tiers,
@@ -705,6 +709,13 @@ impl eframe::App for App {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
         if !dropped.is_empty() {
             self.import(dropped);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let opened = finder::arrived();
+            if !opened.is_empty() {
+                self.import(opened);
+            }
         }
         if let Some(mut s) = self.shots.take() {
             s.step(self, ctx);

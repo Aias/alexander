@@ -21,8 +21,8 @@ but not the app. The macOS bundle is made by the scripts in `macos/`.
 
 ## Working in it
 
-Open photos with Open… (⌘O), by dropping files or folders on the window, or by naming
-them on the command line. On macOS, Open from Photos… (⇧⌘O) shows the system's Photos
+Open photos with Open… (⌘O), by dropping files or folders on the window or on the Dock
+icon, with Open With in the Finder, or by naming them on the command line. On macOS, Open from Photos… (⇧⌘O) shows the system's Photos
 picker, with the library's albums and search, and takes any number of photos. The picker
 hands each photo over in its original format for a moment only, so the app copies it to
 `~/Library/Caches/studio.alexander.app/Photos`, in a folder per photo. The same photo
@@ -208,9 +208,6 @@ and quit.
 
 ## Known limits
 
-- Files opened from the Finder with Open With, or dropped on the Dock icon, arrive as
-  macOS open-document events, which the windowing library does not pass on. Drop them on
-  the window or use Open… instead.
 - HEIC and camera raw files are read through `sips`, which ships with macOS, as a PNG
   that keeps the file's colour profile. Raw files come out as `sips` develops them.
 - JPEG exports carry no embedded ICC profile; untagged JPEG is read as sRGB by browsers
