@@ -5,3 +5,8 @@ pub mod gpu;
 pub mod params;
 pub mod plan;
 pub mod tone;
+pub mod export;
+pub mod library;
+pub mod load;
+pub mod provenance;
+pub mod resize;
