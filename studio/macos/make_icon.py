@@ -1,18 +1,19 @@
 """Generate studio/macos/icon.png, the 1024 px source of the app icon.
 
 The icon is the seal from the cover of The Timeless Way of Building, drawn in
-white on a dark tile. seal.png is a photograph of the seal, centred on its
-rings; the engraving is thresholded from it and the rings are redrawn as
-exact circles.
+white on a dark tile. seal.svg is a vector tracing of the seal in black on a
+transparent ground; its coverage becomes the white of the icon.
 
     python3 studio/macos/make_icon.py
 
-Requires numpy and Pillow.
+Requires numpy, Pillow and resvg-py.
 """
 
+import io
 from pathlib import Path
 
 import numpy as np
+import resvg_py
 from PIL import Image
 
 SIZE = 1024
@@ -21,11 +22,8 @@ SIZE = 1024
 TILE = 824
 RADIUS = 185
 SEAL_RADIUS = 300
-# Radii in seal.png pixels, measured from the photograph's radial ink profile.
-PHOTO_OUTER = 133.5
-ENGRAVING = 124.0
-INNER_RING = (121.5, 127.0)
-OUTER_RING = (131.5, 133.5)
+# Outer edge of the seal's fine border, in seal.svg's 1024-unit view box.
+SVG_OUTER = 481.5
 
 
 def rounded_mask(size: int, tile: int, radius: int) -> np.ndarray:
@@ -42,16 +40,12 @@ def rounded_mask(size: int, tile: int, radius: int) -> np.ndarray:
     return np.clip(0.5 - dist, 0.0, 1.0)
 
 
-def engraving(scale: float) -> np.ndarray:
-    """Ink coverage of the photographed seal, resampled onto the canvas."""
-    photo = Image.open(Path(__file__).with_name("seal.png")).convert("RGB")
-    rgb = np.asarray(photo, dtype=np.float64)
-    # Red ink against cream paper: the red-green gap separates them cleanly.
-    ink = np.clip((rgb[..., 0] - rgb[..., 1] - 30) / 130, 0.0, 1.0)
-    side = round(photo.width * scale)
-    ink = np.asarray(Image.fromarray(ink.astype(np.float32), "F").resize((side, side), Image.BICUBIC))
-    # Steepen the resampled edge to about a pixel wide, so the cut reads crisp.
-    ink = np.clip((ink - 0.5) * 8 + 0.5, 0.0, 1.0)
+def seal() -> np.ndarray:
+    """Ink coverage of seal.svg, rendered centred on the canvas."""
+    side = round(SIZE * SEAL_RADIUS / SVG_OUTER)
+    svg = str(Path(__file__).with_name("seal.svg"))
+    png = bytes(resvg_py.svg_to_bytes(svg_path=svg, width=side, height=side))
+    ink = np.asarray(Image.open(io.BytesIO(png)).getchannel("A"), dtype=np.float64) / 255
     canvas = np.zeros((SIZE, SIZE))
     o = (SIZE - side) // 2
     canvas[o : o + side, o : o + side] = ink
@@ -59,21 +53,10 @@ def engraving(scale: float) -> np.ndarray:
 
 
 def main() -> None:
-    scale = SEAL_RADIUS / PHOTO_OUTER
-    c = (SIZE - 1) / 2
-    y, x = np.mgrid[0:SIZE, 0:SIZE].astype(np.float64)
-    r = np.hypot(x - c, y - c)
-
-    def ring(inner: float, outer: float) -> np.ndarray:
-        mid, half = (inner + outer) / 2 * scale, (outer - inner) / 2 * scale
-        return np.clip(0.5 - (np.abs(r - mid) - half), 0.0, 1.0)
-
-    inside = np.clip(ENGRAVING * scale + 0.5 - r, 0.0, 1.0)
-    seal = np.maximum.reduce([engraving(scale) * inside, ring(*INNER_RING), ring(*OUTER_RING)])
-
+    y = np.mgrid[0:SIZE, 0:SIZE][0] / (SIZE - 1)
     # A faint fall of light from the top, as on the system's dark icons.
-    ground = 0.15 - 0.07 * (y / (SIZE - 1))
-    grey = ground + (0.96 - ground) * seal
+    ground = 0.15 - 0.07 * y
+    grey = ground + (0.96 - ground) * seal()
     alpha = rounded_mask(SIZE, TILE, RADIUS)
 
     rgba = np.empty((SIZE, SIZE, 4), dtype=np.uint8)
