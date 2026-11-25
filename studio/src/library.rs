@@ -387,6 +387,21 @@ impl Library {
         }
     }
 
+    /// Put the film settings of photos back to the defaults and leave the process on or off.
+    /// A photo shown as it is starts from the defaults when the process is switched on again.
+    pub fn reset_looks(&mut self, ids: &[Id]) {
+        self.rev += 1;
+        for &id in ids {
+            if let Some(it) = self.get_mut(id) {
+                if it.look.as_ref().is_some_and(|l| *l != Settings::default()) {
+                    it.look = Some(Settings::default());
+                    it.gen += 1;
+                }
+                it.stash = None;
+            }
+        }
+    }
+
     /// Carry the knobs that differ between `before` and `after` over to every photo in
     /// `ids`, leaving their other knobs alone. A photo with no look starts from the defaults.
     pub fn apply_change(&mut self, ids: &[Id], before: &Settings, after: &Settings) {

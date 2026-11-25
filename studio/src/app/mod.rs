@@ -253,7 +253,7 @@ impl App {
             Dialog::LoadLook => {
                 for p in paths {
                     match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<Settings>(&t).map_err(|e| e.to_string())) {
-                        Ok(l) => self.set_looks(Some(l)),
+                        Ok(l) => self.set_looks(l),
                         Err(e) => self.export_errors.push(format!("{}: {e}", p.display())),
                     }
                 }
@@ -358,10 +358,10 @@ impl App {
         self.lib.focus.and_then(|f| self.lib.get(f)).and_then(|it| it.look.as_ref())
     }
 
-    fn set_looks(&mut self, look: Option<Settings>) {
+    fn set_looks(&mut self, look: Settings) {
         let ids = self.lib.selection();
         self.lib.checkpoint(&ids);
-        self.lib.set_look(&ids, look);
+        self.lib.set_look(&ids, Some(look));
     }
 
     fn copy_look(&mut self, ctx: &egui::Context) {
@@ -375,7 +375,7 @@ impl App {
     fn paste_look(&mut self, text: Option<&str>) {
         let look = text.and_then(|t| serde_json::from_str::<Settings>(t.trim()).ok()).filter(|_| text.is_some_and(|t| t.trim_start().starts_with('{'))).or_else(|| self.clipboard.clone());
         if let Some(l) = look {
-            self.set_looks(Some(l));
+            self.set_looks(l);
         }
     }
 
@@ -405,7 +405,11 @@ impl App {
             }
             Action::CopyLook => self.copy_look(ctx),
             Action::PasteLook => self.paste_look(None),
-            Action::Reset => self.set_looks(None),
+            Action::Reset => {
+                let ids = self.lib.selection();
+                self.lib.checkpoint(&ids);
+                self.lib.reset_looks(&ids);
+            }
             Action::SaveLook => self.save_look(),
             Action::LoadLook => self.load_look(),
             Action::CopyFlags => {
@@ -450,7 +454,7 @@ impl App {
             self.open_export();
         }
         if k(cmd_shift, Key::R) {
-            self.set_looks(None);
+            self.do_action(ctx, controls::Action::Reset);
         }
         if k(cmd_shift, Key::V) && self.clipboard.is_some() {
             self.paste_look(None);

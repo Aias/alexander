@@ -111,7 +111,7 @@ fn footer(ui: &mut Ui, processed: bool, can_paste: bool, actions: &mut Vec<Actio
         };
         button(ui, "Copy", "⇧⌘C", processed, Action::CopyLook);
         button(ui, "Paste", "⇧⌘V", can_paste, Action::PasteLook);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| button(ui, "Reset", "⇧⌘R", true, Action::Reset));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| button(ui, "Reset", "⇧⌘R", processed, Action::Reset));
     });
 }
 

@@ -148,6 +148,22 @@ fn process_toggle_keeps_the_look() {
 }
 
 #[test]
+fn reset_restores_the_defaults_and_keeps_the_process() {
+    let (mut l, id) = lib(2);
+    let look = Settings { grade: 1.5, ..Settings::default() };
+    l.set_look(&id, Some(look));
+    l.set_process(&[id[1]], false);
+    l.checkpoint(&id);
+    l.reset_looks(&id);
+    assert_eq!(l.get(id[0]).unwrap().look, Some(Settings::default()));
+    assert!(l.get(id[1]).unwrap().look.is_none());
+    l.set_process(&[id[1]], true);
+    assert_eq!(l.get(id[1]).unwrap().look, Some(Settings::default()));
+    l.undo();
+    assert_eq!(l.get(id[0]).unwrap().look.as_ref().map(|s| s.grade), Some(1.5));
+}
+
+#[test]
 fn an_export_opens_as_its_original_with_its_look() {
     let dir = std::env::temp_dir().join(format!("studio-roundtrip-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
