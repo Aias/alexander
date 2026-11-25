@@ -44,6 +44,7 @@ pub enum Command {
     Actual,
     StarredOnly,
     Panel,
+    Reference,
 }
 
 impl App {
@@ -139,6 +140,7 @@ impl App {
             Command::Actual => self.zoom_100(),
             Command::StarredOnly => self.lib.set_starred_only(!self.lib.starred_only()),
             Command::Panel => self.panel = !self.panel,
+            Command::Reference => self.reference.shown = !self.reference.shown,
         }
     }
 }

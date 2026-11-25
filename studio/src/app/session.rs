@@ -30,6 +30,10 @@ struct Session {
     starred_only: bool,
     last_dir: Option<PathBuf>,
     recent: Vec<PathBuf>,
+    references: Vec<PathBuf>,
+    reference_at: usize,
+    reference_shown: bool,
+    reference_apart: bool,
 }
 
 /// Where the app keeps what it remembers.
@@ -47,11 +51,12 @@ fn file() -> PathBuf {
 }
 
 /// What a session's file records, to tell whether it needs writing again.
-pub type Saved = (u64, Mode, u32, usize);
+pub type Saved = (u64, Mode, u32, usize, [usize; 2], [bool; 2]);
 
 impl App {
     fn saved_key(&self) -> Saved {
-        (self.lib.revision(), self.mode, self.thumb_pt.to_bits(), self.recent.len())
+        let r = &self.reference;
+        (self.lib.revision(), self.mode, self.thumb_pt.to_bits(), self.recent.len(), [r.pictures.len(), r.at], [r.shown, r.apart])
     }
 
     /// Open the library as the last session left it.
@@ -71,6 +76,10 @@ impl App {
         self.thumb_pt = s.thumb_pt;
         self.last_dir = s.last_dir;
         self.recent = s.recent;
+        self.reference.pictures = s.references;
+        self.reference.at = s.reference_at;
+        self.reference.shown = s.reference_shown;
+        self.reference.apart = s.reference_apart;
         self.saved = (self.saved_key(), Instant::now());
     }
 
@@ -96,6 +105,10 @@ impl App {
             starred_only: self.lib.starred_only(),
             last_dir: self.last_dir.clone(),
             recent: self.recent.clone(),
+            references: self.reference.pictures.clone(),
+            reference_at: self.reference.at,
+            reference_shown: self.reference.shown,
+            reference_apart: self.reference.apart,
         };
         let (dir, tmp) = (data_dir(), file().with_extension("json.tmp"));
         let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&tmp, serde_json::to_vec(&s).unwrap_or_default())).and_then(|_| std::fs::rename(&tmp, file()));

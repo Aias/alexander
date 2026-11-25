@@ -106,6 +106,7 @@ impl MenuBar {
                 &sep(),
                 &b.check("Starred Only", None, Command::StarredOnly, |a| a.lib.starred_only()),
                 &b.check("Panel", key(PLAIN, Code::Tab), Command::Panel, |a| a.panel),
+                &b.check("Reference", key(Modifiers::SHIFT, Code::KeyR), Command::Reference, |a| a.reference.shown),
                 &sep(),
                 &PredefinedMenuItem::fullscreen(None),
             ],

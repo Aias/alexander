@@ -148,6 +148,7 @@ impl App {
         });
         self.export_window(ctx);
         self.errors_window(ctx);
+        self.reference_ui(ctx);
         actions
     }
 

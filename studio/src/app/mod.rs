@@ -10,6 +10,7 @@ mod menu;
 #[cfg(target_os = "macos")]
 mod photos;
 mod presets;
+mod reference;
 mod session;
 mod shots;
 #[cfg(target_os = "macos")]
@@ -63,6 +64,7 @@ enum Dialog {
     ExportFolder,
     SaveLook,
     LoadLook,
+    Reference,
 }
 
 /// The paths a file dialog gives when it closes.
@@ -154,6 +156,7 @@ pub struct App {
     /// The mark on a photo with a look: the SF Symbol for film where there is one.
     film_mark: Option<egui::TextureHandle>,
     presets: Vec<presets::Preset>,
+    reference: reference::Reference,
     /// The name of a preset being made, while it is typed.
     new_preset: Option<String>,
     /// The preset under the pointer this frame, to show on the focused photo.
@@ -218,13 +221,14 @@ impl App {
             #[cfg(not(target_os = "macos"))]
             film_mark: None,
             presets: presets::load(),
+            reference: reference::Reference::default(),
             new_preset: None,
             preview_wanted: None,
             #[cfg(target_os = "macos")]
             menu: Some(menu::MenuBar::new(&cc.egui_ctx)),
             recent: Vec::new(),
             remember,
-            saved: ((0, Mode::Grid, 0, 0), std::time::Instant::now()),
+            saved: ((0, Mode::Grid, 0, 0, [0, 0], [false, false]), std::time::Instant::now()),
             dialog: None,
             waker: Waker::from(Arc::new(Repaint(cc.egui_ctx.clone()))),
         };
@@ -297,6 +301,7 @@ impl App {
                     }
                 }
             }
+            Dialog::Reference => self.reference.add(paths),
             Dialog::LoadLook => {
                 for p in paths {
                     match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<Settings>(&t).map_err(|e| e.to_string())) {
@@ -308,7 +313,7 @@ impl App {
         }
     }
 
-    fn poll(&mut self) {
+    fn poll(&mut self, ctx: &egui::Context) {
         while let Ok(done) = self.workers.rx.try_recv() {
             match done {
                 Done::Collected(paths) => {
@@ -347,6 +352,7 @@ impl App {
                         }
                     }
                 }
+                Done::Reference { path, result } => self.reference.arrived(ctx, path, result),
                 Done::Encoded { path, result } => {
                     if let Some(run) = &mut self.export_run {
                         run.encoding -= 1;
@@ -506,6 +512,7 @@ impl App {
             (none, Key::E, Command::View(Mode::Loupe)),
             (none, Key::Enter, Command::View(Mode::Loupe)),
             (none, Key::Tab, Command::Panel),
+            (shift, Key::R, Command::Reference),
             (none, Key::Backslash, Command::Compare(Compare::Before)),
             (none, Key::Y, Command::Compare(Compare::Split)),
             (none, Key::J, Command::Clipping),
@@ -713,7 +720,7 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let t0 = std::time::Instant::now();
-        self.poll();
+        self.poll(ctx);
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
         if !dropped.is_empty() {
             self.import(dropped);

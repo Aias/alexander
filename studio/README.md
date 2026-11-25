@@ -70,6 +70,13 @@ and is named for it, as in "IMG_1414.jpeg · Copy 1". Opening an export of a pho
 in the library shows its look on the copy that has it, on the photo when the photo has no
 look, or else on a new virtual copy.
 
+The reference (⇧R, as Lightroom's Reference View) shows a picture to work against, such
+as a scanned page of the book, beside the photo being edited. It holds any number of
+pictures, added with Add…, and goes through them with ‹ and ›. It floats over the main
+window, where it can be moved, resized and closed, or Pop Out puts it in a window of its
+own, which can stand anywhere, on another screen too, and takes pictures dropped on it.
+Its pictures are remembered with the library.
+
 Right-clicking a photo opens a menu of what can be done to it: open it in the loupe, show
 it in the Finder, copy its file path, copy its finished picture as an image, make a
 virtual copy, star it, switch the
@@ -96,6 +103,7 @@ the menu; plain keys go to the window, which leaves them to text being typed.
 | S | Star the selection, or take its stars away |
 | ⌘' | Make a virtual copy of each selected photo |
 | ⌘R | Show the selected photos in the Finder |
+| ⇧R | Show or hide the reference |
 | \\ | Before |
 | Y | Split before and after |
 | J | Mark clipped highlights red and clipped shadows blue |
