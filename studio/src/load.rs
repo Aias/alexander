@@ -2,8 +2,9 @@
 //! orientation, an embedded colour profile converted to sRGB, then resized with Lanczos in
 //! gamma space. Runs on worker threads.
 
+use crate::frame::Area;
 use crate::library::{all_weightings, film_index, Levels, Proxy};
-use crate::params::Settings;
+use crate::params::{Frame, Settings};
 use crate::provenance;
 use crate::resize;
 use image::{ImageDecoder, ImageReader};
@@ -135,6 +136,8 @@ pub struct Opened {
     pub original: (u32, u32),
     pub proxy: Proxy,
     pub levels: Levels,
+    /// The picture inside a uniform border, and its levels measured there.
+    pub frame: Option<(Area, Levels)>,
 }
 
 pub fn open(path: &Path) -> Result<Opened, String> {
@@ -142,8 +145,19 @@ pub fn open(path: &Path) -> Result<Opened, String> {
         if let Ok(px) = decode(&r.source) {
             // a record that does not describe this picture (made by hand, or the original
             // replaced since) is ignored rather than opening some other photo in its place
-            if image::image_dimensions(path).is_ok_and(|(w, h)| same_shape((w, h), (px.w, px.h))) {
-                return Ok(measure(r.source, Some(r.look), px));
+            let o = measure(r.source, Some(r.look), px);
+            // an export with its border stripped has the shape of the picture inside it
+            let (w, h) = o.original;
+            let strip = o.look.as_ref().is_some_and(|l| l.frame == Frame::Strip);
+            let shape = match (&o.frame, strip) {
+                (Some((a, _)), true) => {
+                    let [x0, y0, x1, y1] = a.pixels(w, h);
+                    (x1 - x0, y1 - y0)
+                }
+                _ => (w, h),
+            };
+            if image::image_dimensions(path).is_ok_and(|(ew, eh)| same_shape((ew, eh), shape)) {
+                return Ok(o);
             }
         }
     }
@@ -171,14 +185,20 @@ fn measure(path: PathBuf, look: Option<Settings>, px: Pixels) -> Opened {
     let (gw, gh) = resize::fit_long(px.w, px.h, long);
     let grid = resize::rgba8(&px.rgba, px.w, px.h, gw, gh);
     drop(px.rgba);
-    let mut levels: Levels = [[(0.5, 0.9); 4]; 3];
-    for (film, filter) in all_weightings() {
-        let weights = film_weights()[film_index(film)][filter as usize];
-        levels[film_index(film)][filter as usize] = crate::tone::exposure_levels(&grid, gw as usize, gh as usize, weights);
-    }
+    let area = crate::frame::find(&grid, gw as usize, gh as usize);
+    let measure_in = |rect: [u32; 4]| {
+        let mut levels: Levels = [[(0.5, 0.9); 4]; 3];
+        for (film, filter) in all_weightings() {
+            let weights = film_weights()[film_index(film)][filter as usize];
+            levels[film_index(film)][filter as usize] = crate::tone::exposure_levels_in(&grid, gw as usize, gh as usize, weights, rect);
+        }
+        levels
+    };
+    let levels = measure_in([0, 0, gw, gh]);
+    let frame = area.map(|a| (a, measure_in(a.pixels(gw, gh))));
     let (pw, ph) = resize::fit_long(gw, gh, PROXY_PX.min(gw.max(gh)));
     let rgba = resize::rgba8(&grid, gw, gh, pw, ph);
-    Opened { path, look, original: (px.w, px.h), proxy: Proxy { w: pw, h: ph, rgba }, levels }
+    Opened { path, look, original: (px.w, px.h), proxy: Proxy { w: pw, h: ph, rgba }, levels, frame }
 }
 
 fn film_weights() -> &'static [[[f64; 3]; 4]; 3] {

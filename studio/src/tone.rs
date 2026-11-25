@@ -232,17 +232,23 @@ pub fn percentiles(values: &[f32], pcts: &[f64]) -> Vec<f64> {
 /// median and the 98th percentile, as display values. `rgba` is 8-bit sRGB, four bytes a
 /// pixel; large photos are read at every second pixel, which moves neither figure.
 pub fn exposure_levels(rgba: &[u8], w: usize, h: usize, weights: [f64; 3]) -> (f64, f64) {
+    exposure_levels_in(rgba, w, h, weights, [0, 0, w as u32, h as u32])
+}
+
+/// `exposure_levels` read inside `area` alone (left, top, right, bottom in pixels).
+pub fn exposure_levels_in(rgba: &[u8], w: usize, h: usize, weights: [f64; 3], area: [u32; 4]) -> (f64, f64) {
     use rayon::prelude::*;
     let lin: Vec<f32> = (0..256).map(|i| srgb_to_lin(i as f64 / 255.0) as f32).collect();
     let step = if w * h > 1_500_000 { 2 } else { 1 };
     let wt = [weights[0] as f32, weights[1] as f32, weights[2] as f32];
-    let rows: Vec<usize> = (0..h).step_by(step).collect();
+    let [x0, y0, x1, y1] = area.map(|v| v as usize);
+    let rows: Vec<usize> = (y0..y1).step_by(step).collect();
     let values: Vec<f32> = rows
         .par_iter()
         .flat_map_iter(|&y| {
             let row = &rgba[y * w * 4..(y + 1) * w * 4];
             let lin = &lin;
-            (0..w).step_by(step).map(move |x| {
+            (x0..x1).step_by(step).map(move |x| {
                 let p = &row[x * 4..x * 4 + 3];
                 let e = wt[0] * lin[p[0] as usize] + wt[1] * lin[p[1] as usize] + wt[2] * lin[p[2] as usize];
                 lin_to_srgb(e as f64) as f32

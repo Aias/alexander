@@ -159,14 +159,21 @@ impl Tiers {
         load::grid_size(item.original, self.grid_long(item))
     }
 
+    /// The part of the full grid a view shows: its top-left corner and size. The picture
+    /// inside the border when the look strips it, otherwise the whole grid.
+    pub fn shown(&self, item: &Item) -> ([f32; 2], (u32, u32)) {
+        within(item, self.grid_size(item))
+    }
+
     // ---------- asked for during layout ---------------------------------------------------
 
     /// A thumbnail of `item` for a box of `max` physical pixels: its texture (drawn at
     /// some size, maybe an older look) and the size it should be shown at.
     pub fn thumb(&mut self, item: &Item, max: [u32; 2], rank: u8) -> (Option<TextureId>, [u32; 2]) {
         let Some(p) = &item.proxy else { return (None, [0, 0]) };
-        let s = (max[0] as f32 / p.w as f32).min(max[1] as f32 / p.h as f32);
-        let size = [((p.w as f32 * s).round() as u32).clamp(1, p.w.max(1) * 2), ((p.h as f32 * s).round() as u32).clamp(1, p.h.max(1) * 2)];
+        let (_, (pw, ph)) = within(item, (p.w, p.h));
+        let s = (max[0] as f32 / pw as f32).min(max[1] as f32 / ph as f32);
+        let size = [((pw as f32 * s).round() as u32).clamp(1, pw.max(1) * 2), ((ph as f32 * s).round() as u32).clamp(1, ph.max(1) * 2)];
         self.requests.push(Request { id: item.id, want: Want::Thumb, size, rank });
         (self.thumbs.get(&item.id).filter(|t| t.key.is_some()).map(|t| t.id), size)
     }
@@ -342,7 +349,7 @@ impl Tiers {
             return false;
         }
         let planner = &mut self.planners[tier as usize];
-        let plan = planner.plan(look, res.photo.size(), item.auto_ev(look), self.engine.gpu.max_dim);
+        let plan = planner.plan(look, res.photo.size(), item.auto_ev(look), item.area(look), self.engine.gpu.max_dim);
         let t = Instant::now();
         if let Some(stage) = self.engine.render(&mut res.photo, &plan) {
             if focused {
@@ -419,9 +426,9 @@ impl Tiers {
 
     /// The key of a thumbnail of `item` drawn from a current render.
     fn thumb_key(&self, item: &Item, size: [u32; 2], before: bool) -> Option<DrawKey> {
-        let w = item.proxy.as_ref()?.w;
+        let p = item.proxy.as_ref()?;
         let source = before || item.look.is_none();
-        let canvas = Canvas { origin: [0.0, 0.0], scale: w as f32 / size[0] as f32, show_source: source };
+        let canvas = thumb_canvas(item, (p.w, p.h), size, source);
         Some(DrawKey { tier: Tier::Proxy, complete: true, gen: item.gen, canvas: canvas_bits(&canvas), size, source })
     }
 
@@ -450,9 +457,8 @@ impl Tiers {
         if !res.showable(item) {
             return;
         }
-        let (w, _) = res.photo.size();
         let source = before || item.look.is_none();
-        let canvas = Canvas { origin: [0.0, 0.0], scale: w as f32 / size[0] as f32, show_source: source };
+        let canvas = thumb_canvas(item, res.photo.size(), size, source);
         let key = DrawKey { tier: Tier::Proxy, complete: !res.stale(item), gen: item.gen, canvas: canvas_bits(&canvas), size, source };
         let view = Self::view_of(res, item);
         self.draw_into(true, item.id, Tier::Proxy, key, canvas, view, wgpu::FilterMode::Linear);
@@ -523,7 +529,7 @@ impl Tiers {
         match self.fulls.get_mut(&item.id) {
             Some(res) if res.photo.size().0.max(res.photo.size().1) == long => {
                 res.used = self.frame;
-                let plan = planner.plan(look, res.photo.size(), item.auto_ev(look), self.engine.gpu.max_dim);
+                let plan = planner.plan(look, res.photo.size(), item.auto_ev(look), item.area(look), self.engine.gpu.max_dim);
                 self.engine.render(&mut res.photo, &plan);
                 let view = plan.view.clone();
                 res.plan = Some(plan);
@@ -553,6 +559,23 @@ pub type Display = (u32, u32, Vec<f32>);
 fn scaled(canvas: Canvas, pw: u32, grid: (u32, u32), source: bool) -> Canvas {
     let k = pw as f32 / grid.0 as f32;
     Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, show_source: source }
+}
+
+/// The part of a `size` picture of `item` that is shown: top-left corner and size.
+fn within(item: &Item, size: (u32, u32)) -> ([f32; 2], (u32, u32)) {
+    match item.crop() {
+        Some(a) => {
+            let [x0, y0, x1, y1] = a.pixels(size.0, size.1);
+            ([x0 as f32, y0 as f32], ((x1 - x0).max(1), (y1 - y0).max(1)))
+        }
+        None => ([0.0, 0.0], size),
+    }
+}
+
+/// A thumbnail of `size` drawn from the proxy, of `proxy` pixels.
+fn thumb_canvas(item: &Item, proxy: (u32, u32), size: [u32; 2], source: bool) -> Canvas {
+    let (origin, (w, _)) = within(item, proxy);
+    Canvas { origin, scale: w as f32 / size[0] as f32, show_source: source }
 }
 
 fn canvas_bits(c: &Canvas) -> [u32; 3] {

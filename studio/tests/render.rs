@@ -50,7 +50,7 @@ fn run(precision: Precision) {
         let weights = planner.film(s.film).weights[s.filter as usize];
         let (median, top) = tone::exposure_levels(scene.as_raw(), w as usize, h as usize, weights);
         let auto = tone::auto_ev(median, top, s.auto_ev_target);
-        let plan = planner.plan(&s, (w, h), auto, engine.gpu.max_dim);
+        let plan = planner.plan(&s, (w, h), auto, None, engine.gpu.max_dim);
         engine.render(&mut photo, &plan);
         let (_, _, rgba) = engine.read_display(&mut photo, &plan.view);
         let got: Vec<f32> = rgba.as_chunks::<4>().0.iter().map(|p| p[1]).collect();
@@ -87,7 +87,7 @@ fn stages_are_reused() {
     let (w, h) = scene.dimensions();
     let mut photo = engine.upload(scene.as_raw(), w, h);
     let mut planner = Planner::new();
-    let mut plan = |s: &Settings| planner.plan(s, (w, h), -0.63, 8192);
+    let mut plan = |s: &Settings| planner.plan(s, (w, h), -0.63, None, 8192);
     let a = Settings { detail_px: 0, film_mm: 3.6, ..Settings::default() };
     assert_eq!(engine.render(&mut photo, &plan(&a)), Some(Stage::Optics));
     assert_eq!(engine.render(&mut photo, &plan(&a)), None);
@@ -133,7 +133,7 @@ fn grain_statistics_match_python() {
     ];
     let mut failures: Vec<String> = Vec::new();
     for (name, s) in cases {
-        let plan = planner.plan(&s, (w, h), 0.0, engine.gpu.max_dim);
+        let plan = planner.plan(&s, (w, h), 0.0, None, engine.gpu.max_dim);
         engine.render(&mut photo, &plan);
         let (_, _, rgba) = engine.read_display(&mut photo, &plan.view);
         let at = |x: usize, y: usize| rgba[(y * w as usize + x) * 4 + 1] as f64;

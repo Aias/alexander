@@ -19,6 +19,17 @@ pub enum View {
     Page,
 }
 
+/// What to do about a uniform border round the picture (see `frame`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Frame {
+    /// Find it, measure exposure and tones inside it, keep it in the picture.
+    Keep,
+    /// The same, then show and export only the picture inside it.
+    Strip,
+    /// Do not look for one.
+    Off,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -26,6 +37,7 @@ pub struct Settings {
     pub seed: u32,
     // negative
     pub film: FilmKind,
+    pub frame: Frame,
     pub film_mm: f64,
     pub filter: Filter,
     pub lens_um: f64,
@@ -76,6 +88,7 @@ impl Default for Settings {
             detail_px: 2560,
             seed: 1,
             film: FilmKind::Trix1956,
+            frame: Frame::Keep,
             film_mm: 24.0,
             filter: Filter::None,
             lens_um: 10.0,
@@ -167,6 +180,11 @@ impl Settings {
         num("scan-white", self.scan_white, d.scan_white);
         if self.film != d.film {
             f.push(format!("--film {}", self.film.cli()));
+        }
+        match self.frame {
+            Frame::Keep => {}
+            Frame::Strip => f.push("--frame strip".into()),
+            Frame::Off => f.push("--frame off".into()),
         }
         if self.filter != d.filter {
             f.push(format!("--filter {}", self.filter.cli()));

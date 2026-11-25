@@ -25,7 +25,7 @@ fn main() {
     let mut planner = Planner::new();
     let weights = planner.film(s.film).weights[s.filter as usize];
     let (median, top) = tone::exposure_levels(img.as_raw(), w as usize, h as usize, weights);
-    let plan = planner.plan(&s, (w, h), tone::auto_ev(median, top, s.auto_ev_target), engine.gpu.max_dim);
+    let plan = planner.plan(&s, (w, h), tone::auto_ev(median, top, s.auto_ev_target), None, engine.gpu.max_dim);
     let mut photo = engine.upload(img.as_raw(), w, h);
     let start = std::time::Instant::now();
     engine.render(&mut photo, &plan);

@@ -2,7 +2,8 @@
 //! Pure bookkeeping: no pixels and no GPU, so it can be tested on its own.
 
 use crate::film::{FilmKind, Filter};
-use crate::params::Settings;
+use crate::frame::Area;
+use crate::params::{Frame, Settings};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,6 +43,8 @@ pub struct Item {
     pub original: (u32, u32),
     pub proxy: Option<Arc<Proxy>>,
     pub levels: Option<Levels>,
+    /// The picture inside a uniform border, when the photo has one, and its levels.
+    pub frame: Option<(Area, Levels)>,
     /// None shows the photo as it is.
     pub look: Option<Settings>,
     /// The look set aside when the process is switched off, given back when it is switched on.
@@ -52,12 +55,35 @@ pub struct Item {
 
 impl Item {
     pub fn auto_ev(&self, s: &Settings) -> f64 {
-        match &self.levels {
+        let levels = match (&self.frame, s.frame) {
+            (Some((_, inside)), Frame::Keep | Frame::Strip) => Some(inside),
+            _ => self.levels.as_ref(),
+        };
+        match levels {
             Some(l) => {
                 let (median, top) = l[film_index(s.film)][s.filter as usize];
                 crate::tone::auto_ev(median, top, s.auto_ev_target)
             }
             None => 0.0,
+        }
+    }
+
+    /// The picture area the look measures inside, if any.
+    pub fn area(&self, s: &Settings) -> Option<Area> {
+        match (&self.frame, s.frame) {
+            (Some((a, _)), Frame::Keep | Frame::Strip) => Some(*a),
+            _ => None,
+        }
+    }
+
+    /// The part of the photo shown and exported: the picture area when the look strips the
+    /// border, otherwise None for the whole.
+    pub fn crop(&self) -> Option<Area> {
+        let look = self.look.as_ref()?;
+        if look.frame == Frame::Strip {
+            self.area(look)
+        } else {
+            None
         }
     }
 
@@ -150,7 +176,7 @@ impl Library {
         self.rev += 1;
         self.by_path.insert(path.clone(), id);
         self.index.insert(id, self.items.len());
-        self.items.push(Item { id, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, look: None, stash: None, gen: 0 });
+        self.items.push(Item { id, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, frame: None, look: None, stash: None, gen: 0 });
         Some(id)
     }
 
@@ -411,7 +437,7 @@ macro_rules! sync_fields {
 pub fn sync_changed(before: &Settings, after: &Settings, target: &mut Settings) {
     // keep this list in step with `Settings`: tests/library check every field
     sync_fields!(before, after, target;
-        detail_px, seed, film, film_mm, filter, lens_um, lens_exponent, halation, halation_um,
+        detail_px, seed, film, frame, film_mm, filter, lens_um, lens_exponent, halation, halation_um,
         ev, auto_ev, auto_ev_target, dev, grain, grain_light, grain_dev, edge, edge_density, no_edge,
         grade, print_ev, print_grey, enlarger_um, house,
         copy_blur, copy_gain, copy_drop, copy_fill, copy_ink,

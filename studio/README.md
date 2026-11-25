@@ -55,6 +55,12 @@ with a filmstrip (E, Return, or double-click).
 | Drag | Single view: move the photo |
 | Tab | Show or hide the panel |
 
+Border, in the Negative section, deals with a uniform border round the picture, such as
+the paper of a photographed print or letterbox bars, found when the photo is opened as
+`twb2.py --frame` finds it. Keep (the default) measures exposure and tones inside the
+border and leaves it in the picture; Strip does the same and shows and exports only the
+picture inside, in every view and thumbnail, without rendering again; Off does not look.
+
 Double-clicking a knob or its name restores its default. The panel's … menu also saves
 and loads looks as JSON and copies the look as `twb2.py` flags. In the single view 100%
 means one pixel of the simulation grid to one pixel of the screen.
@@ -73,7 +79,10 @@ iTXt chunk named `alexander-studio`, or a JPEG APP11 segment that starts with th
 name. Opening an export whose original is still where it was opens the original with
 that look, ready to change; when the original has gone, the export opens as a photo of
 its own. A record is not followed when its path is relative or names a picture of another
-shape, so a file with a hand-made or stale record opens as itself.
+shape, so a file with a hand-made or stale record opens as itself. An export with its
+border stripped has the shape of the picture inside the border, and is matched to it.
+With Strip, the exported size follows the picture area: at the original's size it keeps
+the resolution it had in the whole photo.
 
 ## How it relates to twb2.py
 
@@ -118,6 +127,8 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 `tests/render.rs` compares GPU renders with `twb2.py` and checks that stages are reused,
+`tests/borders.rs` that borders are found where `twb2.py` finds them and that a scene in a
+mat renders as it does there, kept and stripped,
 `tests/derived.rs` the curve mathematics, and `tests/library.rs` selection, looks, undo,
 EXIF orientation and the round trip from an export back to its original. The export
 encoder has unit tests in `src/export.rs`. Render tests are skipped on a machine without

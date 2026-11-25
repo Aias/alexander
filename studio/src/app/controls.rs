@@ -2,7 +2,7 @@
 //! every selected photo.
 
 use alexander_studio::film::{Dev, FilmKind, Filter};
-use alexander_studio::params::{Repro, Settings, View};
+use alexander_studio::params::{Frame, Repro, Settings, View};
 use egui::{ComboBox, Label, RichText, Sense, Slider, Ui};
 
 pub enum Action {
@@ -104,6 +104,9 @@ pub fn knobs(ui: &mut Ui, s: &mut Settings) {
     section(ui, "Negative", true, |ui| {
         row(ui, "Film", "", |ui| combo(ui, "film", &mut s.film, &FilmKind::ALL.map(|k| (k, k.label()))));
         row(ui, "Filter", "", |ui| combo(ui, "filter", &mut s.filter, &[(Filter::None, "None"), (Filter::Yellow, "Yellow"), (Filter::Orange, "Orange"), (Filter::Red, "Red")]));
+        row(ui, "Border", "A uniform border round the picture, such as a print's paper or letterbox bars. Keep: exposure and tones are measured inside it. Strip: the same, and only the picture inside is shown and exported. Off: not looked for", |ui| {
+            combo(ui, "frame", &mut s.frame, &[(Frame::Keep, "Keep"), (Frame::Strip, "Strip"), (Frame::Off, "Off")])
+        });
         knob(ui, "Film size", "Long edge of film the picture fills, mm. 36 is a full 35mm frame", &mut s.film_mm, 8.0..=72.0, d.film_mm, 1);
         knob(ui, "Exposure", "Stops", &mut s.ev, -3.0..=3.0, d.ev, 2);
         row(ui, "Auto exposure", "", |ui| {

@@ -3,8 +3,9 @@
 
     python3 studio/tests/make_fixtures.py
 
-Writes studio/tests/fixtures/derived.json (curves and derived numbers) and, for a
-synthetic scene, the scene itself and full renders without grain as 16-bit PNGs.
+Writes studio/tests/fixtures/derived.json (curves and derived numbers); for a
+synthetic scene, the scene itself and full renders without grain as 16-bit PNGs; and
+synthetic photos with and without a border, with the picture area twb2.py finds in each.
 """
 import contextlib, io, json, math, os, sys
 
@@ -123,3 +124,102 @@ for name, extra in GRAIN_CASES.items():
     stats["cases"][name] = {"flags": extra, "bands": rows}
     print(name, [(round(r["mean"], 3), round(r["std"], 4)) for r in rows])
 json.dump(stats, open(os.path.join(OUT, "grain.json"), "w"), indent=1)
+
+# ---- borders: synthetic photos with and without one, what twb2.py finds in each, and a
+# framed scene rendered with its border kept and stripped ----
+from scipy import ndimage as ndi  # noqa: E402
+
+
+def photo(h, w, seed):
+    """An ordinary picture: smooth light, objects with edges, a little noise."""
+    r = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    yy /= h; xx /= w
+    v = 0.25 + 0.3 * xx + 0.15 * np.sin(9 * xx + 3 * yy) * np.cos(7 * yy)
+    for _ in range(6):
+        cx, cy, rad, val = r.uniform(0.1, 0.9), r.uniform(0.1, 0.9), r.uniform(0.05, 0.2), r.uniform(0.05, 0.8)
+        v = np.where((xx - cx) ** 2 + ((yy - cy) * h / w) ** 2 < rad ** 2, val, v)
+    return np.clip(v + 0.03 * r.standard_normal((h, w)), 0.0, 1.0)
+
+
+def framed(h, w, tone, edges, seed, angle=0.0, texture=0.01, shadow=0.0):
+    """A picture inside a border of `tone`; `edges` are its widths (left, top, right,
+    bottom). `texture` roughens the border like paper, `shadow` darkens it next to the
+    picture, `angle` turns the picture by that many degrees."""
+    l, t, rr, b = edges
+    r = np.random.default_rng(seed + 1)
+    blot = ndi.gaussian_filter(r.standard_normal((h, w)), 12) * 12
+    border = np.clip(tone + texture * r.standard_normal((h, w)) + texture * blot, 0.0, 1.0)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    cx, cy, a = (l + w - rr) / 2, (t + h - b) / 2, math.radians(angle)
+    u = (xx - cx) * math.cos(a) + (yy - cy) * math.sin(a)
+    v = -(xx - cx) * math.sin(a) + (yy - cy) * math.cos(a)
+    hw, hh = (w - l - rr) / 2, (h - t - b) / 2
+    if shadow:
+        border = border - shadow * np.exp(-np.maximum(np.maximum(np.abs(u) - hw, np.abs(v) - hh), 0) / 6.0)
+    return np.where((np.abs(u) < hw) & (np.abs(v) < hh), photo(h, w, seed), border)
+
+
+def border_cases():
+    h, w = 320, 384
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    r = np.random.default_rng(10)
+    rough = ndi.gaussian_filter(np.random.default_rng(15).standard_normal((h, w)), 10) * 40
+    edge = np.minimum.reduce([xx, yy, w - 1 - xx, h - 1 - yy])
+    return {
+        # a border is expected
+        "white_uneven": framed(h, w, 0.93, (20, 14, 30, 64), 1),
+        "letterbox": framed(288, w, 0.02, (0, 40, 0, 40), 2, texture=0.004),
+        "pillarbox": framed(288, w, 0.0, (48, 0, 48, 0), 3, texture=0.0),
+        "rotated": framed(h, w, 0.9, (26, 24, 26, 24), 4, angle=1.5),
+        "textured": framed(h, w, 0.86, (22, 20, 24, 36), 5, texture=0.025, shadow=0.05),
+        # none is: bright sky along the top only, a flat overcast sky over a straight
+        # horizon, snow along the bottom, dark corners, a night scene with black edges of
+        # irregular shape, a wall filling one side
+        "sky_blown": np.where(yy < 0.25 * h + 18 * np.sin(xx / 23) + 10 * np.sin(xx / 7) + 6 * (np.floor(xx / 30) % 3), 1.0, photo(h, w, 11)),
+        "sky_overcast": np.where(yy < 0.3 * h, 0.82 + 0.1 * yy / h + 0.004 * r.standard_normal((h, w)), photo(h, w, 12)),
+        "snow": np.where(yy > 0.8 * h + 8 * np.sin(xx / 40) + 3 * np.sin(xx / 9), np.clip(0.92 + 0.02 * r.standard_normal((h, w)), 0, 1), photo(h, w, 13)),
+        "vignette": photo(h, w, 14) * np.clip(1.3 - 1.6 * ((xx / w - 0.5) ** 2 + (yy / h - 0.5) ** 2) / 0.5, 0, 1),
+        "night": np.where(edge + 30 * rough < 50, 0.0, 0.02 + 0.4 * (photo(h, w, 16) > 0.55)),
+        "wall": np.where(xx < 0.35 * w, np.clip(0.6 + 0.01 * r.standard_normal((h, w)), 0, 1), photo(h, w, 17)),
+        # a mid-grey mat round a picture whose own tones meet it along much of its edge:
+        # missed, as a doubtful border should be
+        "mat_meets_picture": framed(384, 320, 0.55, (40, 40, 40, 40), 6),
+    }
+
+
+BORDERS = os.path.join(OUT, "borders")
+os.makedirs(BORDERS, exist_ok=True)
+found = {}
+for name, g in border_cases().items():
+    path = os.path.join(BORDERS, f"{name}.png")
+    Image.fromarray((g * 255 + 0.5).astype(np.uint8), "L").save(path)
+    rgb = twb2.load_linear(path)
+    area = twb2.find_frame(rgb)
+    found[name] = None if area is None else [int(v) for v in np.array(twb2.area_px(rgb.shape, area))[[2, 0, 3, 1]]]
+    print(f"border {name:18s}", found[name])
+
+# the synthetic scene in a dark mat, rendered as the other scenes are
+paper = framed(256 + 14 + 40, 384 + 18 + 22, 0.1, (18, 14, 22, 40), 20)
+scene_px = np.asarray(Image.open(scene).convert("RGB"), dtype=np.float64) / 255
+sheet = np.repeat(paper[..., None], 3, -1)
+sheet[14:14 + 256, 18:18 + 384] = scene_px
+framed_png = os.path.join(BORDERS, "scene_framed.png")
+Image.fromarray((sheet * 255 + 0.5).astype(np.uint8), "RGB").save(framed_png)
+renders = {}
+for mode in ("keep", "strip"):
+    out = os.path.join(OUT, f"render_framed_{mode}.png")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        twb2.main([framed_png, "-o", out, "--auto-ev", "--grain", "0", "--detail-px", "0", "--film-mm", FILM_MM, "--bits", "16", "--frame", mode])
+    renders[mode] = {"log": buf.getvalue().strip().splitlines()[:2]}
+    print("framed", mode, renders[mode]["log"])
+# stripping crops the finished picture and changes nothing inside it
+keep = np.asarray(Image.open(os.path.join(OUT, "render_framed_keep.png")))
+strip = np.asarray(Image.open(os.path.join(OUT, "render_framed_strip.png")))
+rgb = twb2.load_linear(framed_png)
+area = twb2.find_frame(rgb)
+y0, y1, x0, x1 = twb2.area_px(rgb.shape, area)
+assert strip.shape == (y1 - y0, x1 - x0) and np.array_equal(keep[y0:y1, x0:x1], strip), "strip differs from keep inside the area"
+found["scene_framed"] = [x0, y0, x1, y1]
+json.dump({"found": found, "renders": renders, "film_mm": float(FILM_MM)}, open(os.path.join(OUT, "borders.json"), "w"), indent=1)

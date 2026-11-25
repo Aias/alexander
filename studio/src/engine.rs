@@ -45,7 +45,9 @@ impl Photo {
     }
 }
 
-type CopyKey = (bool, [u32; 9]);
+/// What the house tones' percentiles depend on beyond the print: the copy's numbers and
+/// the area they are read in.
+type CopyKey = (bool, [u32; 9], Option<[u32; 4]>);
 
 struct Cache {
     plan: Plan,
@@ -372,9 +374,9 @@ impl Engine {
     fn copy_key(plan: &Plan) -> CopyKey {
         let f = &plan.finish;
         if f.repro != Repro::Copy {
-            return (false, [0; 9]);
+            return (false, [0; 9], f.area);
         }
-        (true, [f.black, f.copy_solid, f.copy_tau, f.copy_dmax_in, f.copy_ink, f.copy_drop, f.copy_fill, f.copy_gain, f.copy_sigma as f32].map(f32::to_bits))
+        (true, [f.black, f.copy_solid, f.copy_tau, f.copy_dmax_in, f.copy_ink, f.copy_drop, f.copy_fill, f.copy_gain, f.copy_sigma as f32].map(f32::to_bits), f.area)
     }
 
     /// Everything after the darkroom print. Returns the encoder to go on recording with:
@@ -413,8 +415,14 @@ impl Engine {
                     self.gpu.submit(enc);
                     enc = self.gpu.encoder();
                     let bytes = self.gpu.read(&small, 4);
-                    let values: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+                    let mut values: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
                     self.give(small);
+                    if let Some([x0, y0, x1, y1]) = f.area {
+                        // the samples of the every-third-pixel lattice that fall inside the area
+                        let sw = w.div_ceil(3) as usize;
+                        let (c0, c1, r0, r1) = (x0.div_ceil(3) as usize, x1.div_ceil(3) as usize, y0.div_ceil(3) as usize, y1.div_ceil(3) as usize);
+                        values = (r0..r1).flat_map(|r| values[r * sw + c0..r * sw + c1].to_vec()).collect();
+                    }
                     let p = tone::percentiles(&values, &HOUSE_PCT);
                     let p = [p[0], p[1], p[2], p[3], p[4]];
                     *own = Some((key, p));

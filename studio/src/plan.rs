@@ -3,7 +3,8 @@
 //! nothing upstream changed.
 
 use crate::film::{contrast_index, curve_x, interp, Dev, Film, FilmKind, CURVE_N};
-use crate::params::{Repro, Settings, View};
+use crate::frame::Area;
+use crate::params::{Frame, Repro, Settings, View};
 use crate::tone::{compress_tau, Paper, PAPER_N};
 
 /// A blur as a weighted sum of Gaussians. `sigma` 0 stands for the unblurred image.
@@ -52,6 +53,9 @@ pub struct PaperPlan {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FinishPlan {
     pub house: f64,
+    /// Where the house tones read the picture's percentiles, in grid pixels (left, top,
+    /// right, bottom): inside a border, or None for the whole grid.
+    pub area: Option<[u32; 4]>,
     pub repro: Repro,
     pub black: f32, // reflectance of the print's own black
     // copied from a printed page
@@ -138,9 +142,10 @@ impl Planner {
     }
 
     /// `source` is the photo's grid in pixels, `auto_ev` the automatic exposure measured
-    /// for it (ignored when automatic exposure is off), `max_dim` the largest texture the
-    /// device can hold.
-    pub fn plan(&mut self, s: &Settings, source: (u32, u32), auto_ev: f64, max_dim: u32) -> Plan {
+    /// for it (ignored when automatic exposure is off), `area` the picture inside its border
+    /// if it has one (ignored when the look does not look for borders), `max_dim` the
+    /// largest texture the device can hold.
+    pub fn plan(&mut self, s: &Settings, source: (u32, u32), auto_ev: f64, area: Option<Area>, max_dim: u32) -> Plan {
         let dev = self.dev_minutes(s);
         let gkey = (s.film, dev.to_bits(), s.grain_dev.to_bits());
         let dev_grain = match &self.grain_dev {
@@ -237,6 +242,7 @@ impl Planner {
         let press_solid = 10f64.powf(-s.ink_density);
         let finish = FinishPlan {
             house: s.house.clamp(0.0, 1.0),
+            area: area.filter(|_| s.frame != Frame::Off).map(|a| a.pixels(grid.0, grid.1)),
             repro: s.repro,
             black: black as f32,
             copy_solid: 10f64.powf(-s.copy_ink) as f32,

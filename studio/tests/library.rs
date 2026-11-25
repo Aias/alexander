@@ -119,6 +119,7 @@ fn every_knob_is_carried() {
                 "film" => serde_json::json!("DoubleX"),
                 "filter" => serde_json::json!("Red"),
                 "repro" => serde_json::json!("Book"),
+                "frame" => serde_json::json!("Strip"),
                 other => panic!("no test value for {other}"),
             },
             other => panic!("unexpected {other}"),

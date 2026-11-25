@@ -49,6 +49,23 @@ pub struct Picture {
     pub rgba: Vec<f32>,
 }
 
+impl Picture {
+    /// The part of the picture inside `area`, for a look that strips the border.
+    pub fn crop(&self, area: &crate::frame::Area) -> Picture {
+        let [x0, y0, x1, y1] = area.pixels(self.w, self.h);
+        let row = |y: u32| &self.rgba[((y * self.w + x0) * 4) as usize..((y * self.w + x1) * 4) as usize];
+        Picture { w: x1 - x0, h: y1 - y0, rgba: (y0..y1).flat_map(|y| row(y).to_vec()).collect() }
+    }
+}
+
+/// Long edge of the original a crop of a `grid`-sized render stands for: the crop's own
+/// long edge scaled as the whole grid is to the original, so the picture keeps the
+/// resolution it would have had.
+pub fn cropped_long(crop: (u32, u32), grid: (u32, u32), original_long: u32) -> u32 {
+    let scale = original_long as f64 / grid.0.max(grid.1) as f64;
+    ((crop.0.max(crop.1) as f64 * scale).round() as u32).max(1)
+}
+
 /// Where to write `source`'s export in `dir`: `<stem>-twb.<ext>`, numbered when taken.
 /// Never a path that `taken` reports in use, so neither an existing file nor an original
 /// is overwritten.
