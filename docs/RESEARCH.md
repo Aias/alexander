@@ -176,7 +176,8 @@ sixth of an unprotected film's halation. In comparison a 5% glow could not be se
 
 Exposure becomes density along the film's published characteristic curve for the chosen
 development time. A metered grey is placed where an exposure at the film's speed puts
-it. `--auto-ev` sets the exposure from the picture's median and brightest tones.
+it. `--auto-ev` sets the exposure from the picture's median and brightest tones, read
+inside a border when the photo has one (section 4.12).
 
 ### 4.6 The films
 
@@ -284,13 +285,49 @@ straight print.
   screen beside a scan whose levels have been set. Off.
 - **Cream paper (`--view page`).** Off.
 
-### 4.12 Checks
+### 4.12 Borders
+
+A photo can carry a border that is not part of the picture: the white paper of a
+photographed print or instant picture, a mat, the black bars of a letterboxed frame.
+Automatic exposure and the house tones both measure the picture, and a border counts in
+both. On a photographed instant print whose paper is a tenth of the pixels, the paper
+read as the brightest tones: the house tones put the lightest tenth at pure white and gave
+the picture inside less range than it should have had.
+
+`--frame keep`, the default, looks for such a border and measures inside it. A border is
+a band of one even tone along two opposite sides, or all four. Each side is followed
+inward, position by position, while the tone stays within 0.08 of the tone at the edge
+(display values, after a 5 px smoothing that takes out paper texture). Across the middle
+60% of the side, 85% of the positions must end on one straight line, tilted no more than
+about 3 degrees; the band must be at least 0.5% of the picture deep and no more than a
+quarter; the tone inside it must vary by no more than 0.03; and opposite sides must agree
+in tone within 0.12. The picture area stops a margin of 0.4% of the long edge plus three pixels
+inside the deepest point of each edge, which allows for a print photographed a degree or
+two askew. Nothing is cut: the
+border goes through the whole chain and stays in the result. `--frame strip` crops the
+finished picture to that area; the picture's own pixels are the same as with `keep`.
+`--frame off` does not look.
+
+The test asks for two opposite sides because single bands are common in ordinary
+photographs: a blown or overcast sky along the top, snow or water along the bottom, a
+wall filling one side. The straight inner edge rules out dark corners and night scenes
+whose black edges follow the subject. Synthetic photos of each kind are part of the tests,
+with the border cases beside them.
+
+The trade-off is that the test misses some real borders: one whose tone the picture
+continues along much of its edge (a black bar beside a dark scene, a grey mat beside grey
+tones), or one narrower than half a percent of the picture. Those are measured as before.
+A missed border costs what it cost before the test existed; an invented one would move a
+picture's exposure and tones for no reason, so doubtful cases are left alone.
+
+### 4.13 Checks
 
 `tools/calibrate.py` confirms that the simulated negatives read their datasheet
 granularity through a 48 micrometre aperture at several pixel sizes, that their
 sharpness follows the published curves, that film and paper curves pass through the
-digitised points, that named developments reach their contrast figures, and that a
-picture supplied at two pixel counts renders the same.
+digitised points, that named developments reach their contrast figures, that a
+picture supplied at two pixel counts renders the same, and that a picture in a mat is
+measured as the picture alone.
 
 `tools/audit.py` measures any set of renders against any set of reference pages: tone
 percentiles, edge widths and texture at four scales.
@@ -313,6 +350,7 @@ percentiles, edge widths and texture at four scales.
 | Edge effects by tone difference only | Weighted by density, after Nelson | Comparison | Departs from the literature |
 | No halation, no lens flare | Period-correct amounts | Comparison; a dislike of haze | Less physically complete |
 | Copy and press stages optional | Either as default | Measurement; comparison | The literal chain of the book is not the default path |
+| Measure inside a uniform border, keep it in the picture | Measure the whole photo; crop the border | A border counted as picture skews exposure and tones | Some real borders are missed; cropping is a choice (`--frame strip`) |
 
 ## 6. What was learned about judging
 

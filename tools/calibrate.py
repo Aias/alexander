@@ -153,5 +153,48 @@ D = twb2.add_grain(np.full((k * 300, k * 300), 1.0, np.float32), side / k, 1.0, 
 check("granularity of the 1956 Tri-X setting", float(D.reshape(300, k, 300, k).mean(axis=(1, 3)).std() * 1000), 22.0, 0.5)
 twb2.select_film("trix")
 
+# 7. A border round the picture: found, measured inside, kept or stripped
+print("7. a border round the picture (the scene of section 4 in a dark mat)")
+with tempfile.TemporaryDirectory() as tmp:
+    pic = np.asarray(scene(1200))
+    h, w = pic.shape[:2]
+    sheet = np.full((h + 150, w + 110, 3), 12, np.uint8)
+    sheet[50:50 + h, 40:40 + w] = pic
+    paths = {k: os.path.join(tmp, f"{k}.png") for k in ("pic", "sheet", "keep", "strip", "off", "pic_out", "pic_off")}
+    Image.fromarray(pic).save(paths["pic"])
+    Image.fromarray(sheet).save(paths["sheet"])
+    logs = {}
+    for k, src, extra in (("keep", "sheet", []), ("strip", "sheet", ["--frame", "strip"]), ("off", "sheet", ["--frame", "off"]),
+                          ("pic_out", "pic", []), ("pic_off", "pic", ["--frame", "off"])):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            twb2.main([paths[src], "-o", paths[k], "--auto-ev", "--out-long-edge", "1000", *extra])
+        logs[k] = buf.getvalue()
+    rgb = twb2.load_linear(paths["sheet"], 2560)
+    area = twb2.find_frame(rgb)
+    check("border found in the mat", float(area is not None), 1.0, 0)
+    y0, y1, x0, x1 = twb2.area_px(rgb.shape, area)
+    s = 2560 / max(sheet.shape[:2])
+    check("picture area stays inside the picture (pixels of mat let in)",
+          float(max(0, 40 * s - x0) + max(0, 50 * s - y0) + max(0, x1 - (40 + w) * s) + max(0, y1 - (50 + h) * s)), 0.0, 0)
+    check("share of the picture kept in the area", (x1 - x0) * (y1 - y0) / (w * h * s * s), 1.0, 0.04)
+    ev = lambda log: float(log.split("auto exposure ")[1].split()[0])
+    check("auto exposure inside the mat against the picture alone, EV", ev(logs["keep"]), ev(logs["pic_out"]), 0.03)
+    check("auto exposure without looking for it differs, EV", float(abs(ev(logs["off"]) - ev(logs["pic_out"])) > 0.1), 1.0, 0)
+    keep, strip = (np.asarray(Image.open(paths[k]).convert("L")) for k in ("keep", "strip"))
+    ky0, ky1, kx0, kx1 = twb2.area_px(keep.shape, area)
+    check("stripped size: long edge as the area has it in the kept result", float(max(strip.shape)), float(max(ky1 - ky0, kx1 - kx0)), 1)
+    check("house tones inside the mat against the picture alone, median",
+          float(np.median(keep[ky0:ky1, kx0:kx1])), float(np.median(np.asarray(Image.open(paths["pic_out"]).convert("L"))[5:-5, 5:-5])), 2.0)
+    check("a picture without a border is unchanged by looking for one",
+          float(np.abs(np.asarray(Image.open(paths["pic_out"]), np.int16) - np.asarray(Image.open(paths["pic_off"]), np.int16)).max()), 0.0, 0)
+    # at the size simulated, stripping is a crop of the kept result and nothing else
+    for k, extra in (("keep", []), ("strip", ["--frame", "strip"])):
+        with contextlib.redirect_stdout(io.StringIO()):
+            twb2.main([paths["sheet"], "-o", paths[k], "--auto-ev", "--detail-px", "0", *extra])
+    keep, strip = (np.asarray(Image.open(paths[k]).convert("L")) for k in ("keep", "strip"))
+    ky0, ky1, kx0, kx1 = twb2.area_px(keep.shape, twb2.find_frame(twb2.load_linear(paths["sheet"])))
+    check("stripped pixels against the kept result inside the area", float(np.abs(keep[ky0:ky1, kx0:kx1].astype(int) - strip).max()) if strip.shape == (ky1 - ky0, kx1 - kx0) else 99.0, 0.0, 0)
+
 print("\nALL CHECKS PASSED" if ok else "\nSOME CHECKS FAILED")
 sys.exit(0 if ok else 1)

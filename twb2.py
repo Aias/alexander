@@ -114,6 +114,94 @@ def load_linear(path, work_long_edge=None):
     return srgb_to_lin(np.asarray(im, dtype=F) / 255).astype(F)
 
 
+# ---------- the photo's own border ---------------------------------------------------
+# A photographed print, a mat or a letterboxed frame brings a band of one tone along
+# opposite sides. Counted as part of the picture it moves both measurements: a white border
+# reads as the brightest tones, a black one as the deepest. The test below looks for such a
+# band and prefers missing a doubtful one to inventing one.
+FRAME_TOL = 0.08          # tone step (display value, after 5x5 smoothing) that ends a band
+FRAME_REACH = 0.30        # how far into the picture a band is followed, as a share of it
+FRAME_WIDEST = 0.25       # widest band accepted
+FRAME_STRAIGHT = 0.85     # share of a side whose inner edge must lie on one straight line
+FRAME_SLOPE = 0.05        # steepest inner edge, about 3 degrees
+FRAME_EVEN = 0.03         # largest spread of tone inside a band (paper texture, soft shadow)
+FRAME_MATCH = 0.12        # largest difference in tone between the sides of one frame
+
+
+def frame_side(a):
+    """One side of the picture, turned so its outer edge is row 0 of `a` (smoothed display
+    values). Follows the band of the edge's own tone inward at each position and asks
+    whether its inner edge is straight, its tone even and its width plausible."""
+    n, m = a.shape
+    reach = int(n * FRAME_REACH)
+    t = a[2]                                             # the edge's tone, position by position
+    off = np.abs(a[:reach] - t[None, :]) > FRAME_TOL
+    d = np.where(off.any(0), off.argmax(0), reach).astype(np.float64)
+    # the inner edge is judged on the middle of the side, away from the corners where
+    # neighbouring bands cross
+    lo, hi = m * 2 // 10, m * 8 // 10
+    pos = np.arange(lo, hi, dtype=np.float64)
+    dd = d[lo:hi]
+    half = (hi - lo) // 2
+    slope = (np.median(dd[half:]) - np.median(dd[:half])) / (pos[half:].mean() - pos[:half].mean())
+    icpt = float(np.median(dd - slope * pos))
+    line = icpt + slope * pos
+    tol = max(2.0, 0.003 * n)
+    # medians find the edge among outliers (picture tones that continue the band); a least
+    # squares fit to the points near it then places it to a fraction of a pixel
+    for _ in range(2):
+        near = np.abs(dd - line) <= 3.0 * tol
+        if near.sum() < 2:
+            break
+        px, py = pos[near], dd[near]
+        slope = float(np.sum((px - px.mean()) * (py - py.mean())) / np.sum((px - px.mean()) ** 2))
+        icpt = float(py.mean() - slope * px.mean())
+        line = icpt + slope * pos
+    straight = float(np.mean(np.abs(dd - line) <= tol))
+    inner = max(icpt, icpt + slope * (m - 1))            # deepest point of the edge across the whole side
+    band = np.arange(reach, dtype=np.float64)[:, None] + 3.0 < line[None, :]
+    vals = a[:reach, lo:hi][band]
+    ok = (straight >= FRAME_STRAIGHT and abs(slope) <= FRAME_SLOPE and line.min() >= max(4.0, 0.005 * n)
+          and inner <= FRAME_WIDEST * n and vals.size > 0)
+    if ok:
+        spread = float(np.std(vals - np.broadcast_to(t[lo:hi], band.shape)[band]))
+        ok = spread <= FRAME_EVEN
+    return {"ok": bool(ok), "tone": float(vals.mean()) if vals.size else 0.0, "inner": float(inner)}
+
+
+def find_frame(rgb):
+    """The picture area inside a uniform border, as fractions of the width and height
+    (left, top, right, bottom), or None. A border is a band of one even tone along two
+    opposite sides (or all four) whose inner edge is straight; its sides must agree in tone.
+    The area stops a small margin inside the band's deepest point, which allows for a print
+    photographed a degree or two askew."""
+    h, w = rgb.shape[:2]
+    if min(h, w) < 64:
+        return None
+    x = rgb.astype(np.float64)
+    s = ndi.uniform_filter(lin_to_srgb(0.2126 * x[..., 0] + 0.7152 * x[..., 1] + 0.0722 * x[..., 2]), 5, mode="nearest")
+    sides = {k: frame_side(a) for k, a in (("top", s), ("bottom", s[::-1]), ("left", s.T), ("right", s[:, ::-1].T))}
+    pairs = [(a, b) for a, b in (("top", "bottom"), ("left", "right"))
+             if sides[a]["ok"] and sides[b]["ok"] and abs(sides[a]["tone"] - sides[b]["tone"]) <= FRAME_MATCH]
+    if not pairs:
+        return None
+    ref = float(np.mean([sides[k]["tone"] for pair in pairs for k in pair]))
+    # the smoothing ends a band up to two pixels early; past that, a small safety margin
+    margin = 3 + math.ceil(0.004 * max(h, w))
+    e = {k: (math.ceil(v["inner"]) + margin if v["ok"] and abs(v["tone"] - ref) <= FRAME_MATCH else 0) for k, v in sides.items()}
+    x0, y0, x1, y1 = e["left"], e["top"], w - e["right"], h - e["bottom"]
+    if x1 - x0 < w / 2 or y1 - y0 < h / 2:
+        return None
+    return (x0 / w, y0 / h, x1 / w, y1 / h)
+
+
+def area_px(shape, area):
+    """The picture area in pixels (top, bottom, left, right) for a grid of `shape`."""
+    h, w = shape[:2]
+    return (math.floor(area[1] * h + 0.5), math.floor(area[3] * h + 0.5),
+            math.floor(area[0] * w + 0.5), math.floor(area[2] * w + 0.5))
+
+
 def blur(x, sigma_px):
     """Gaussian blur. Very wide blurs are done on a reduced copy."""
     if sigma_px < 0.15:
@@ -266,7 +354,12 @@ def film_exposure(rgb, p, weights=None):
     E = (w["r"] * rgb[..., 0] + w["g"] * rgb[..., 1] + w["b"] * rgb[..., 2]).astype(F)
     ev = p.ev
     if p.auto_ev is not None:
-        enc = lin_to_srgb(E)
+        area = getattr(p, "area", None)
+        if area:
+            y0, y1, x0, x1 = area_px(E.shape, area)
+            enc = lin_to_srgb(E[y0:y1, x0:x1])
+        else:
+            enc = lin_to_srgb(E)
         med, top = float(np.median(enc)), float(np.percentile(enc, 98))
         lin = lambda v: float(srgb_to_lin(np.float64(v)))
         auto = 0.5 * (math.log2(lin(p.auto_ev) / max(lin(med), 1e-4)) + math.log2(lin(0.90) / max(lin(top), 1e-4)))
@@ -422,16 +515,22 @@ def copied_from_page(R, p, long_edge):
     return (1.0 - t * (1.0 - black)).astype(F)
 
 
-def house_tones(R, strength):
+def house_tones(R, strength, area=None):
     """Pull a picture's tones toward the range the book's pages share. The book's makers
     copied every source to a common look: shadows opened to a set level and the lightest
     tones taken to paper white. The picture's own percentiles are moved toward the book's
     (`strength`, 0 to 1) along a smooth curve that keeps their order. No part of the scale
     is stretched by more than HOUSE_MAX_SLOPE, so grain is not blown up where a picture's
     tones bunch together, and the light end is compressed toward white, where the book's
-    pages are cleanest."""
+    pages are cleanest. With `area` the percentiles are read inside the picture area only,
+    so a border does not count as the picture's own tones."""
     v = lin_to_srgb(np.clip(R, 0.0, 1.0))
-    own = np.percentile(v[::3, ::3], HOUSE_PCT)
+    if area:
+        # the same every-third-pixel lattice as the whole picture, cut to the area
+        y0, y1, x0, x1 = area_px(v.shape, area)
+        own = np.percentile(v[-(-y0 // 3) * 3:y1:3, -(-x0 // 3) * 3:x1:3], HOUSE_PCT)
+    else:
+        own = np.percentile(v[::3, ::3], HOUSE_PCT)
     want = (1.0 - strength) * own + strength * np.array(HOUSE_VAL)
     xs, ys = [0.0], [0.0]
     for x, y in zip(own, want):
@@ -484,6 +583,10 @@ def page_size_mm(long_edge_px, p):
 
 
 def render(rgb, p):
+    p.area = find_frame(rgb) if getattr(p, "frame", "off") != "off" else None
+    if p.area:
+        y0, y1, x0, x1 = area_px(rgb.shape, p.area)
+        print(f"frame found: tones measured inside {x1 - x0}x{y1 - y0} at ({x0}, {y0}) of {rgb.shape[1]}x{rgb.shape[0]}")
     long_edge = max(rgb.shape[:2])
     page_mm = page_size_mm(long_edge, p)
     # Small renders have pixels coarser than the page's finest blur. Work on a finer
@@ -516,7 +619,7 @@ def render(rgb, p):
     if p.repro == "copy":
         R = copied_from_page(R, p, long_edge)
     if p.house > 0:
-        R = house_tones(R, p.house)
+        R = house_tones(R, p.house, p.area)
     if p.repro == "book":
         R, solid = halftone_on_page(R, p, mm)
     if k > 1:
@@ -573,6 +676,11 @@ def parser():
                         "1956 (default, preferred in blind comparison; its two numbers are estimates). "
                         "trix: Kodak Tri-X Pan from its datasheet. doublex: Eastman Double-X 5222, an "
                         "emulsion of 1959")
+    g.add_argument("--frame", choices=("keep", "strip", "off"), default="keep",
+                   help="a uniform border round the picture (a photographed print's paper, a mat, "
+                        "letterbox bars): keep = find it, measure exposure and tones inside it and keep "
+                        "it in the result (default); strip = the same, then crop the result to the picture "
+                        "inside it; off = do not look for one")
     g.add_argument("--film-mm", type=float, default=24.0,
                    help="long edge of the piece of film the picture fills: 36 = a whole 35mm frame, 24 = a "
                         "moderate crop of one (default), 18 = half-frame, 56 = 6x4.5")
@@ -676,7 +784,18 @@ def main(argv=None):
     if p.out_long_edge is None:
         p.out_long_edge = original
     rgb = load_linear(p.input, p.detail_px or original)
-    save(render(rgb, p), p.output, p)
+    out = render(rgb, p)
+    if p.frame == "strip" and p.area:
+        out, p.out_long_edge = strip(out, p.area, p.out_long_edge)
+    save(out, p.output, p)
+
+
+def strip(out, area, out_long_edge):
+    """Crop a finished picture to its picture area, and the long edge the crop is saved at
+    so it keeps the resolution the whole would have had."""
+    y0, y1, x0, x1 = area_px(out.shape, area)
+    scale = out_long_edge / max(out.shape[:2])
+    return out[y0:y1, x0:x1], max(1, math.floor(max(y1 - y0, x1 - x0) * scale + 0.5))
 
 
 if __name__ == "__main__":

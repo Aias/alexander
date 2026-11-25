@@ -33,6 +33,7 @@ Useful switches:
 | Switch | What it does | Default |
 | --- | --- | --- |
 | `--auto-ev` | Sets exposure from the picture; `--ev` adds stops on top | off |
+| `--frame` | A uniform border round the picture, such as the paper of a photographed print, a mat, or letterbox bars. `keep` finds it and measures exposure and house tones inside it, leaving the border in the result; `strip` does the same and crops the result to the picture inside, at the resolution it would have had; `off` does not look for one. A border is found only when it runs along two opposite sides in one even tone with a straight inner edge; the tool prints a line when it finds one | keep |
 | `--grade` | Paper grade, -1 (soft) to 5 (hard) | 3 |
 | `--print-ev` | Print exposure in stops; more is darker | -0.5 |
 | `--detail-px` | Long edge of the grid the film and print are simulated on before enlarging. Lower is coarser and softer; 0 uses the input's own size | 2560 |
@@ -60,6 +61,11 @@ A harder alternative to the default tone is `--grade 4.25 --print-ev 0`.
 
 The research behind every stage, its sources and the decisions taken are written up in
 [docs/RESEARCH.md](docs/RESEARCH.md).
+
+## Studio
+
+`studio/` holds Alexander Studio, a desktop app that runs the same simulation live on the GPU
+over a library of photos; see [studio/README.md](studio/README.md).
 
 ## What each stage does
 
@@ -143,7 +149,9 @@ This confirms that the simulated negative reads the datasheet granularity of 17 
 a 48 micrometre aperture at three pixel sizes, that its sharpness follows the published
 curve, that the film and paper curves pass through the digitised points, and that a
 picture supplied at 1,500 px and at 4,500 px renders the same. It repeats the film checks
-for Double-X, and checks the contrast index and gamma of the named developments.
+for Double-X, checks the contrast index and gamma of the named developments, and checks
+that a picture in a mat is measured as the picture alone and that stripping the mat
+changes no pixel of the picture.
 
 ## Files
 
