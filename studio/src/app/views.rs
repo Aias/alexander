@@ -443,7 +443,7 @@ impl App {
             let d = resp.drag_delta();
             c = [c[0] - d.x * ppp / z, c[1] - d.y * ppp / z];
         }
-        if resp.double_clicked() {
+        if resp.clicked() {
             if self.zoom.is_some() {
                 self.zoom = None;
             } else if let Some(h) = resp.interact_pointer_pos() {

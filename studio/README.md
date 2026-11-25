@@ -68,7 +68,7 @@ size of its simulation grid, cut to the picture inside its border when the look 
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |
 | ⇧⌘R | Reset the selection to the original |
 | ⌘Z / ⇧⌘Z | Undo and redo changes to looks |
-| Z, or double-click | Loupe: fit or 100% |
+| Z, or click | Loupe: fit, or 100% about the point clicked |
 | ⌘0 / ⌘1 | Loupe: fit / 100% |
 | ⌘+ / ⌘− | Zoom in and out; in the library, larger and smaller thumbnails |
 | Scroll or pinch | Loupe: zoom about the pointer |
