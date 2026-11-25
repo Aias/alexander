@@ -34,14 +34,13 @@ struct Resident {
     /// The look generation the plan was made for.
     gen: Option<u64>,
     plan: Option<Plan>,
-    /// Counts the renders that changed the picture.
-    version: u64,
+    /// The frame this photo was last needed in, for a render or a draw.
     used: u64,
 }
 
 impl Resident {
     fn new(photo: Photo) -> Resident {
-        Resident { photo, gen: None, plan: None, version: 0, used: 0 }
+        Resident { photo, gen: None, plan: None, used: 0 }
     }
 
     fn bytes(&self) -> u64 {
@@ -64,7 +63,9 @@ impl Resident {
 #[derive(Clone, PartialEq)]
 struct DrawKey {
     tier: Tier,
-    version: u64,
+    /// Drawn from a render of the current look (or of no look), not an older one kept on
+    /// screen while the new one is made.
+    complete: bool,
     gen: u64,
     canvas: [u32; 3],
     size: [u32; 2],
@@ -241,6 +242,16 @@ impl Tiers {
             first = false;
             match r.want {
                 Want::Thumb => {
+                    // a thumbnail already showing the current look needs nothing from the
+                    // GPU copy, which can then be let go of under the budget
+                    let current = self.thumb_key(item, r.size, before);
+                    if let Some(s) = self.thumbs.get_mut(&item.id).filter(|s| s.key == current) {
+                        s.used = self.frame;
+                        if r.rank == 0 {
+                            self.touch(Tier::Proxy, item.id);
+                        }
+                        continue;
+                    }
                     if !self.ensure(Tier::Proxy, item, may_render, r.rank == 0) {
                         pending = true;
                     }
@@ -250,6 +261,20 @@ impl Tiers {
                     let long = grid.0.max(grid.1);
                     // a canvas no larger than the proxy is drawn from the proxy
                     let wants_full = r.size[0].max(r.size[1]) as f32 > 1.15 * item.proxy.as_ref().map_or(0, |p| p.w.max(p.h)) as f32 || canvas.scale < 1.0;
+                    let current = self.canvas_key(item, if wants_full { Tier::Full } else { Tier::Proxy }, canvas, grid, r.size, before);
+                    if let Some(s) = self.canvases.get_mut(&item.id).filter(|s| s.key == current) {
+                        s.used = self.frame;
+                        // a full grid is read from disk again if let go, so the one on
+                        // screen is kept, as is the proxy of the photo being edited
+                        if let Some(f) = self.fulls.get_mut(&item.id).filter(|_| wants_full) {
+                            f.used = self.frame;
+                            full_bytes += f.bytes();
+                        }
+                        if r.rank == 0 {
+                            self.touch(Tier::Proxy, item.id);
+                        }
+                        continue;
+                    }
                     let mut tier = Tier::Proxy;
                     if wants_full {
                         let have = self.fulls.get(&item.id).map(|f| f.photo.size());
@@ -297,6 +322,11 @@ impl Tiers {
     fn ensure(&mut self, tier: Tier, item: &Item, may_render: bool, focused: bool) -> bool {
         let frame = self.frame;
         if tier == Tier::Proxy && !self.proxies.contains_key(&item.id) {
+            // uploads share the frame's budget with renders, so a screen of hundreds of
+            // photos fills in over frames instead of holding all of them on the GPU at once
+            if !may_render {
+                return false;
+            }
             let p = item.proxy.as_ref().unwrap();
             let photo = self.engine.upload(&p.rgba, p.w, p.h);
             self.proxies.insert(item.id, Resident::new(photo));
@@ -315,7 +345,6 @@ impl Tiers {
         let plan = planner.plan(look, res.photo.size(), item.auto_ev(look), self.engine.gpu.max_dim);
         let t = Instant::now();
         if let Some(stage) = self.engine.render(&mut res.photo, &plan) {
-            res.version += 1;
             if focused {
                 self.last_focus_stage = Some((tier, stage, t.elapsed().as_secs_f32() * 1000.0));
                 if self.trace {
@@ -388,6 +417,34 @@ impl Tiers {
         }
     }
 
+    /// The key of a thumbnail of `item` drawn from a current render.
+    fn thumb_key(&self, item: &Item, size: [u32; 2], before: bool) -> Option<DrawKey> {
+        let w = item.proxy.as_ref()?.w;
+        let source = before || item.look.is_none();
+        let canvas = Canvas { origin: [0.0, 0.0], scale: w as f32 / size[0] as f32, show_source: source };
+        Some(DrawKey { tier: Tier::Proxy, complete: true, gen: item.gen, canvas: canvas_bits(&canvas), size, source })
+    }
+
+    /// The key of a canvas of `item` drawn from a current render at `tier`. A full grid
+    /// counts only at the size the look asks for.
+    #[allow(clippy::too_many_arguments)]
+    fn canvas_key(&self, item: &Item, tier: Tier, canvas: Canvas, grid: (u32, u32), size: [u32; 2], before: bool) -> Option<DrawKey> {
+        let pw = match tier {
+            Tier::Proxy => item.proxy.as_ref()?.w,
+            Tier::Full => grid.0,
+        };
+        let c = scaled(canvas, pw, grid, before || item.look.is_none());
+        Some(DrawKey { tier, complete: true, gen: item.gen, canvas: canvas_bits(&c), size, source: c.show_source })
+    }
+
+    /// Mark a photo on the GPU as needed this frame, so it is not let go of.
+    fn touch(&mut self, tier: Tier, id: Id) {
+        let map = if tier == Tier::Proxy { &mut self.proxies } else { &mut self.fulls };
+        if let Some(r) = map.get_mut(&id) {
+            r.used = self.frame;
+        }
+    }
+
     fn draw_thumb(&mut self, item: &Item, size: [u32; 2], before: bool) {
         let Some(res) = self.proxies.get(&item.id) else { return };
         if !res.showable(item) {
@@ -396,7 +453,7 @@ impl Tiers {
         let (w, _) = res.photo.size();
         let source = before || item.look.is_none();
         let canvas = Canvas { origin: [0.0, 0.0], scale: w as f32 / size[0] as f32, show_source: source };
-        let key = DrawKey { tier: Tier::Proxy, version: res.version, gen: item.gen, canvas: canvas_bits(&canvas), size, source };
+        let key = DrawKey { tier: Tier::Proxy, complete: !res.stale(item), gen: item.gen, canvas: canvas_bits(&canvas), size, source };
         let view = Self::view_of(res, item);
         self.draw_into(true, item.id, Tier::Proxy, key, canvas, view, wgpu::FilterMode::Linear);
     }
@@ -411,11 +468,8 @@ impl Tiers {
             }
             return;
         }
-        let (pw, _) = res.photo.size();
-        let k = pw as f32 / grid.0 as f32;
-        let source = before || item.look.is_none();
-        let c = Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, show_source: source };
-        let key = DrawKey { tier, version: res.version, gen: item.gen, canvas: canvas_bits(&c), size, source };
+        let c = scaled(canvas, res.photo.size().0, grid, before || item.look.is_none());
+        let key = DrawKey { tier, complete: !res.stale(item), gen: item.gen, canvas: canvas_bits(&c), size, source: c.show_source };
         let view = Self::view_of(res, item);
         self.draw_into(false, item.id, tier, key, c, view, wgpu::FilterMode::Nearest);
     }
@@ -470,9 +524,7 @@ impl Tiers {
             Some(res) if res.photo.size().0.max(res.photo.size().1) == long => {
                 res.used = self.frame;
                 let plan = planner.plan(look, res.photo.size(), item.auto_ev(look), self.engine.gpu.max_dim);
-                if self.engine.render(&mut res.photo, &plan).is_some() {
-                    res.version += 1;
-                }
+                self.engine.render(&mut res.photo, &plan);
                 let view = plan.view.clone();
                 res.plan = Some(plan);
                 res.gen = Some(item.gen);
@@ -496,6 +548,12 @@ impl Tiers {
 
 /// Width, height and display values, four floats a pixel.
 pub type Display = (u32, u32, Vec<f32>);
+
+/// `canvas`, given in the coordinates of a full grid of `grid`, for a photo `pw` wide.
+fn scaled(canvas: Canvas, pw: u32, grid: (u32, u32), source: bool) -> Canvas {
+    let k = pw as f32 / grid.0 as f32;
+    Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, show_source: source }
+}
 
 fn canvas_bits(c: &Canvas) -> [u32; 3] {
     [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits()]

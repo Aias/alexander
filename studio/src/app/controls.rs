@@ -23,7 +23,7 @@ fn label_cell(ui: &mut Ui, label: &str, sense: Sense) -> egui::Response {
     let size = egui::vec2(LABEL_W, ui.spacing().interact_size.y);
     ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.set_min_size(size);
-        ui.add(Label::new(RichText::new(label).weak()).sense(sense).truncate())
+        ui.add(Label::new(RichText::new(label).color(super::views::LABEL)).sense(sense).truncate())
     })
     .inner
 }

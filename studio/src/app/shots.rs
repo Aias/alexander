@@ -112,7 +112,7 @@ impl Shots {
             12 => {
                 let dir = self.dir.join("export");
                 let _ = std::fs::create_dir_all(&dir);
-                app.start_export(ExportForm { dir, format: Format::Png8, size: SizeChoice::Original, long: 0 });
+                app.start_export(ExportForm { dir, dir_ok: true, format: Format::Png8, size: SizeChoice::Original, long: 0 });
                 self.step += 1;
             }
             13 if settled => {

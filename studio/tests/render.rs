@@ -53,7 +53,7 @@ fn run(precision: Precision) {
         let plan = planner.plan(&s, (w, h), auto, engine.gpu.max_dim);
         engine.render(&mut photo, &plan);
         let (_, _, rgba) = engine.read_display(&mut photo, &plan.view);
-        let got: Vec<f32> = rgba.chunks_exact(4).map(|p| p[1]).collect();
+        let got: Vec<f32> = rgba.as_chunks::<4>().0.iter().map(|p| p[1]).collect();
         let want: Vec<f32> = image::open(fixtures().join(format!("render_{name}.png"))).unwrap().into_luma16().as_raw().iter().map(|&v| v as f32 / 65535.0).collect();
         assert_eq!(got.len(), want.len(), "{name}: size");
         let (mean, high, max) = differences(&got, &want);

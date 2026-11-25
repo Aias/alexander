@@ -73,8 +73,12 @@ pub type Snapshot = Vec<(Id, Option<Settings>, Option<Settings>)>;
 pub struct Library {
     items: Vec<Item>,
     index: HashMap<Id, usize>,
+    by_path: HashMap<PathBuf, Id>,
+    /// Bumped by every change that can alter what the views show or count, so the app
+    /// can keep figures over the selection without walking it each frame.
+    rev: u64,
     next_id: Id,
-    pub selected: BTreeSet<Id>,
+    selected: BTreeSet<Id>,
     pub focus: Option<Id>,
     anchor: Option<Id>,
     undo: Vec<Snapshot>,
@@ -111,11 +115,28 @@ impl Library {
     }
 
     pub fn get_mut(&mut self, id: Id) -> Option<&mut Item> {
+        self.rev += 1;
         self.index.get(&id).map(|&i| &mut self.items[i])
     }
 
     pub fn find_path(&self, path: &Path) -> Option<Id> {
-        self.items.iter().find(|it| it.path == path).map(|it| it.id)
+        self.by_path.get(path).copied()
+    }
+
+    /// Point a photo at another file (an export found to stand for its original).
+    pub fn set_path(&mut self, id: Id, path: PathBuf) {
+        let Some(&i) = self.index.get(&id) else { return };
+        self.rev += 1;
+        let it = &mut self.items[i];
+        self.by_path.remove(&it.path);
+        it.name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        it.path = path.clone();
+        self.by_path.insert(path, id);
+    }
+
+    /// Changes with every edit to the library, its selection or its looks.
+    pub fn revision(&self) -> u64 {
+        self.rev
     }
 
     /// Add a photo unless the same file is already in the library. Returns the new id.
@@ -126,6 +147,8 @@ impl Library {
         let id = self.next_id;
         self.next_id += 1;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        self.rev += 1;
+        self.by_path.insert(path.clone(), id);
         self.index.insert(id, self.items.len());
         self.items.push(Item { id, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, look: None, stash: None, gen: 0 });
         Some(id)
@@ -138,7 +161,9 @@ impl Library {
             return;
         }
         let first = ids.iter().filter_map(|id| self.position(*id)).min();
+        self.rev += 1;
         self.items.retain(|it| !ids.contains(&it.id));
+        self.by_path.retain(|_, id| !ids.contains(id));
         self.reindex();
         self.selected.retain(|id| !ids.contains(id));
         for stack in [&mut self.undo, &mut self.redo] {
@@ -174,6 +199,7 @@ impl Library {
 
     /// A plain click: this photo alone.
     pub fn click(&mut self, id: Id) {
+        self.rev += 1;
         if self.position(id).is_none() {
             return;
         }
@@ -185,6 +211,7 @@ impl Library {
 
     /// Command-click: add or take away one photo.
     pub fn toggle(&mut self, id: Id) {
+        self.rev += 1;
         if self.position(id).is_none() {
             return;
         }
@@ -201,6 +228,7 @@ impl Library {
 
     /// Shift-click: everything from the anchor to this photo.
     pub fn extend(&mut self, id: Id) {
+        self.rev += 1;
         let Some(to) = self.position(id) else { return };
         let from = self.anchor.and_then(|a| self.position(a)).unwrap_or(to);
         let (a, b) = (from.min(to), from.max(to));
@@ -209,6 +237,7 @@ impl Library {
     }
 
     pub fn select_all(&mut self) {
+        self.rev += 1;
         self.selected = self.items.iter().map(|it| it.id).collect();
         if self.focus.is_none() {
             self.focus = self.items.first().map(|it| it.id);
@@ -217,6 +246,7 @@ impl Library {
     }
 
     pub fn select_none(&mut self) {
+        self.rev += 1;
         self.selected.clear();
     }
 
@@ -248,6 +278,7 @@ impl Library {
 
     /// Move the focus within the selection, leaving the selection as it is.
     pub fn step_in_selection(&mut self, delta: isize) {
+        self.rev += 1;
         let ids: Vec<Id> = self.selected.iter().copied().collect();
         if ids.is_empty() {
             return;
@@ -255,6 +286,10 @@ impl Library {
         let i = self.focus.and_then(|f| ids.iter().position(|&x| x == f)).unwrap_or(0);
         let j = (i as isize + delta).clamp(0, ids.len() as isize - 1) as usize;
         self.focus = Some(ids[j]);
+    }
+
+    pub fn selected(&self) -> &BTreeSet<Id> {
+        &self.selected
     }
 
     /// Selected photos in library order.
@@ -281,6 +316,7 @@ impl Library {
     }
 
     fn restore(&mut self, snap: Snapshot) -> Snapshot {
+        self.rev += 1;
         let ids: Vec<Id> = snap.iter().map(|s| s.0).collect();
         let inverse = self.snapshot(&ids);
         for (id, look, stash) in snap {
@@ -311,6 +347,7 @@ impl Library {
     }
 
     pub fn set_look(&mut self, ids: &[Id], look: Option<Settings>) {
+        self.rev += 1;
         for &id in ids {
             if let Some(it) = self.get_mut(id) {
                 if it.look != look {
@@ -327,6 +364,7 @@ impl Library {
     /// Carry the knobs that differ between `before` and `after` over to every photo in
     /// `ids`, leaving their other knobs alone. A photo with no look starts from the defaults.
     pub fn apply_change(&mut self, ids: &[Id], before: &Settings, after: &Settings) {
+        self.rev += 1;
         for &id in ids {
             if let Some(it) = self.get_mut(id) {
                 let mut look = it.look.take().or_else(|| it.stash.take()).unwrap_or_default();
@@ -346,6 +384,7 @@ impl Library {
     /// Switch the process on or off. A look switched off is kept and comes back when it is
     /// switched on again; a photo never processed starts from the defaults.
     pub fn set_process(&mut self, ids: &[Id], on: bool) {
+        self.rev += 1;
         for &id in ids {
             if let Some(it) = self.get_mut(id) {
                 if on && it.look.is_none() {

@@ -37,6 +37,8 @@ enum SizeChoice {
 
 struct ExportForm {
     dir: PathBuf,
+    /// Whether `dir` is a folder, checked when it is chosen rather than every frame.
+    dir_ok: bool,
     format: Format,
     size: SizeChoice,
     long: u32,
@@ -81,6 +83,8 @@ pub struct App {
     shots: Option<shots::Shots>,
     frame_times: VecDeque<f32>,
     last_fit: f32,
+    /// Library revision and the count of exportable selected photos at it.
+    exportable: (u64, usize),
 }
 
 impl App {
@@ -117,6 +121,7 @@ impl App {
             shots,
             frame_times: VecDeque::new(),
             last_fit: 1.0,
+            exportable: (u64::MAX, 0),
         };
         if app.shots.is_none() && !paths.is_empty() {
             app.import(paths);
@@ -157,7 +162,7 @@ impl App {
                             self.workers.send(Job::Open { id, path: p });
                         }
                     }
-                    if let (Some(id), true) = (first, self.lib.selected.is_empty()) {
+                    if let (Some(id), true) = (first, self.lib.selected().is_empty()) {
                         self.lib.click(id);
                     }
                 }
@@ -165,12 +170,21 @@ impl App {
                     self.opening -= 1;
                     self.opened(id, result);
                 }
-                Done::Full { id, long, result } => match result {
-                    Ok(px) if self.lib.get(id).is_some() => self.tiers.full_arrived(id, long, px),
-                    _ => {
-                        self.tiers.loading.remove(&(id, long));
+                Done::Full { id, long, result } => {
+                    self.tiers.loading.remove(&(id, long));
+                    let Some(item) = self.lib.get(id) else { continue };
+                    match result {
+                        // a grid asked for before `detail_px` changed is no longer wanted
+                        Ok(px) if self.tiers.grid_long(item) == long => self.tiers.full_arrived(id, long, px),
+                        Ok(_) => {}
+                        // the file went away or changed since it was opened: asking again
+                        // every frame would only read the disk to fail again
+                        Err(e) => {
+                            self.tiers.forget(id);
+                            self.lib.get_mut(id).unwrap().status = Status::Failed(e);
+                        }
                     }
-                },
+                }
                 Done::Encoded { path, result } => {
                     if let Some(run) = &mut self.export_run {
                         run.encoding -= 1;
@@ -204,9 +218,8 @@ impl App {
                         return;
                     }
                 }
+                self.lib.set_path(id, o.path);
                 let it = self.lib.get_mut(id).unwrap();
-                it.name = o.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                it.path = o.path;
                 it.original = o.original;
                 it.proxy = Some(Arc::new(o.proxy));
                 it.levels = Some(o.levels);
@@ -298,7 +311,9 @@ impl App {
     // ---------- keys ---------------------------------------------------------------------
 
     fn keys(&mut self, ctx: &egui::Context) {
-        if ctx.wants_keyboard_input() {
+        // a dialog takes the keys: Return there means Export, not the single view, and
+        // Delete must not take photos out of the library behind it
+        if ctx.wants_keyboard_input() || self.export_form.is_some() || !self.export_errors.is_empty() {
             return;
         }
         let cmd = Modifiers::COMMAND;
@@ -383,7 +398,7 @@ impl App {
         if k(none, Key::Backslash) {
             self.before = !self.before;
         }
-        if k(none, Key::V) && !self.lib.selected.is_empty() {
+        if k(none, Key::V) && !self.lib.selected().is_empty() {
             self.do_action(ctx, controls::Action::Process(None));
         }
         if k(none, Key::Z) && self.mode == Mode::Single {
@@ -394,7 +409,7 @@ impl App {
             }
         }
         if k(none, Key::Delete) || k(none, Key::Backspace) {
-            let ids = self.lib.selected.clone();
+            let ids = self.lib.selected().clone();
             self.forget(&ids);
         }
         let mut moved = false;
@@ -419,8 +434,15 @@ impl App {
 
     // ---------- export -------------------------------------------------------------------
 
-    fn exportable(&self) -> usize {
-        self.lib.selected.iter().filter(|&&id| self.lib.get(id).is_some_and(|it| it.look.is_some() && it.ready())).count()
+    /// Selected photos that can be exported. Counted again only when the library has
+    /// changed, so a large selection costs nothing on frames that change nothing.
+    fn exportable(&mut self) -> usize {
+        let rev = self.lib.revision();
+        if self.exportable.0 != rev {
+            let n = self.lib.selected().iter().filter(|&&id| self.lib.get(id).is_some_and(|it| it.look.is_some() && it.ready())).count();
+            self.exportable = (rev, n);
+        }
+        self.exportable.1
     }
 
     fn open_export(&mut self) {
@@ -428,11 +450,11 @@ impl App {
             return;
         }
         let dir = self.last_dir.clone().or_else(|| self.lib.focus.and_then(|f| self.lib.get(f)).and_then(|it| it.path.parent().map(|p| p.to_path_buf()))).unwrap_or_default();
-        self.export_form = Some(ExportForm { dir, format: Format::Jpeg, size: SizeChoice::Original, long: 3000 });
+        self.export_form = Some(ExportForm { dir_ok: dir.is_dir(), dir, format: Format::Jpeg, size: SizeChoice::Original, long: 3000 });
     }
 
     fn start_export(&mut self, form: ExportForm) {
-        let queue: VecDeque<Id> = self.lib.selected.iter().copied().filter(|&id| self.lib.get(id).is_some_and(|it| it.look.is_some() && it.ready())).collect();
+        let queue: VecDeque<Id> = self.lib.selected().iter().copied().filter(|&id| self.lib.get(id).is_some_and(|it| it.look.is_some() && it.ready())).collect();
         let total = queue.len();
         self.export_run = Some(ExportRun { queue, form, total, done: 0, encoding: 0, failed: Vec::new(), claimed: HashSet::new(), planner: Planner::new() });
     }
@@ -454,6 +476,12 @@ impl App {
             run.done += 1;
             return;
         };
+        if let Status::Failed(e) = &item.status {
+            run.failed.push(format!("{}: {e}", item.path.display()));
+            run.queue.pop_front();
+            run.done += 1;
+            return;
+        }
         match self.tiers.export_pixels(item, &mut run.planner) {
             Ok(None) => {
                 run.queue.pop_front();

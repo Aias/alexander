@@ -103,18 +103,26 @@ fn run(shared: Arc<(Mutex<Queues>, Condvar)>, tx: Sender<Done>, wake: Arc<dyn Fn
                 q = cv.wait(q).unwrap();
             }
         };
-        let done = match job {
-            Job::Collect(paths) => Done::Collected(load::collect(&paths)),
-            Job::Open { id, path } => Done::Opened { id, result: load::open(&path).map(Box::new) },
-            Job::Full { id, path, long } => Done::Full { id, long, result: load::full(&path, long) },
-            Job::Encode { pic, size, original_long, format, record, path } => {
-                let result = export::write(&pic, size, original_long, format, &record, &path);
-                Done::Encoded { path, result }
-            }
-        };
+        let done = work(job);
         if tx.send(done).is_err() {
             return;
         }
         wake();
+    }
+}
+
+/// Do one job. A decoder that panics on a malformed file fails that job alone: the app
+/// still hears back, so the photo is marked as unreadable instead of loading for ever.
+fn work(job: Job) -> Done {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    let caught = |e: Box<dyn std::any::Any + Send>| e.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| e.downcast_ref::<String>().cloned()).unwrap_or_else(|| "unreadable".into());
+    match job {
+        Job::Collect(paths) => Done::Collected(catch_unwind(AssertUnwindSafe(|| load::collect(&paths))).unwrap_or_default()),
+        Job::Open { id, path } => Done::Opened { id, result: catch_unwind(AssertUnwindSafe(|| load::open(&path).map(Box::new))).unwrap_or_else(|e| Err(caught(e))) },
+        Job::Full { id, path, long } => Done::Full { id, long, result: catch_unwind(AssertUnwindSafe(|| load::full(&path, long))).unwrap_or_else(|e| Err(caught(e))) },
+        Job::Encode { pic, size, original_long, format, record, path } => {
+            let result = catch_unwind(AssertUnwindSafe(|| export::write(&pic, size, original_long, format, &record, &path))).unwrap_or_else(|e| Err(caught(e)));
+            Done::Encoded { path, result }
+        }
     }
 }

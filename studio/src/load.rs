@@ -32,10 +32,13 @@ pub fn is_photo(path: &Path) -> bool {
     path.extension().map(|e| e.to_string_lossy().to_lowercase()).is_some_and(|e| extensions().contains(&e.as_str()))
 }
 
-/// Photos in `paths`, folders walked into. Hidden files are skipped.
+/// Photos in `paths`, folders walked into. Hidden files are skipped. Paths come back
+/// absolute and with links resolved, so one file is one entry however it was named, and
+/// the source recorded in an export still finds it from another working directory.
 pub fn collect(paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for p in paths {
+        let p = &std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
         if p.is_dir() {
             let mut entries: Vec<PathBuf> = std::fs::read_dir(p).map(|d| d.flatten().map(|e| e.path()).collect()).unwrap_or_default();
             entries.retain(|e| !e.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')));
@@ -135,19 +138,47 @@ pub struct Opened {
 }
 
 pub fn open(path: &Path) -> Result<Opened, String> {
-    let (path, look) = match provenance::resolve(path) {
-        Some(r) => (r.source, Some(r.look)),
-        None => (path.to_path_buf(), None),
-    };
-    let px = decode(&path)?;
-    let (pw, ph) = resize::fit_long(px.w, px.h, PROXY_PX.min(px.w.max(px.h)));
-    let rgba = resize::rgba8(&px.rgba, px.w, px.h, pw, ph);
+    if let Some(r) = provenance::resolve(path) {
+        if let Ok(px) = decode(&r.source) {
+            // a record that does not describe this picture (made by hand, or the original
+            // replaced since) is ignored rather than opening some other photo in its place
+            if image::image_dimensions(path).is_ok_and(|(w, h)| same_shape((w, h), (px.w, px.h))) {
+                return Ok(measure(r.source, Some(r.look), px));
+            }
+        }
+    }
+    Ok(measure(path.to_path_buf(), None, decode(path)?))
+}
+
+/// Whether a picture of size `a` can be `b` resized: the same aspect up to rounding.
+fn same_shape(a: (u32, u32), b: (u32, u32)) -> bool {
+    let (long_a, long_b) = (a.0.max(a.1), b.0.max(b.1));
+    if (a.0 >= a.1) != (b.0 >= b.1) && a.0 != a.1 && b.0 != b.1 {
+        return false;
+    }
+    let short_a = a.0.min(a.1) as f64;
+    let short_b = b.0.min(b.1) as f64 * long_a as f64 / long_b as f64;
+    (short_a - short_b).abs() <= 1.0 + 1e-6 * short_a
+}
+
+/// The proxy and exposure levels of a decoded photo. The levels are measured on the photo
+/// at the default simulation grid, the picture `film_exposure` in twb2.py measures, so
+/// automatic exposure agrees with `--auto-ev`; the small proxy alone reads the brightest
+/// tones a little higher. A look with another `detail_px` still uses these levels, so a
+/// thumbnail and its full render always share one exposure.
+fn measure(path: PathBuf, look: Option<Settings>, px: Pixels) -> Opened {
+    let long = grid_long(Settings::default().detail_px, (px.w, px.h), u32::MAX);
+    let (gw, gh) = resize::fit_long(px.w, px.h, long);
+    let grid = resize::rgba8(&px.rgba, px.w, px.h, gw, gh);
+    drop(px.rgba);
     let mut levels: Levels = [[(0.5, 0.9); 4]; 3];
     for (film, filter) in all_weightings() {
         let weights = film_weights()[film_index(film)][filter as usize];
-        levels[film_index(film)][filter as usize] = crate::tone::exposure_levels(&rgba, pw as usize, ph as usize, weights);
+        levels[film_index(film)][filter as usize] = crate::tone::exposure_levels(&grid, gw as usize, gh as usize, weights);
     }
-    Ok(Opened { path, look, original: (px.w, px.h), proxy: Proxy { w: pw, h: ph, rgba }, levels })
+    let (pw, ph) = resize::fit_long(gw, gh, PROXY_PX.min(gw.max(gh)));
+    let rgba = resize::rgba8(&grid, gw, gh, pw, ph);
+    Opened { path, look, original: (px.w, px.h), proxy: Proxy { w: pw, h: ph, rgba }, levels }
 }
 
 fn film_weights() -> &'static [[[f64; 3]; 4]; 3] {
@@ -161,4 +192,19 @@ pub fn full(path: &Path, long: u32) -> Result<Pixels, String> {
     let (w, h) = resize::fit_long(px.w, px.h, long);
     let rgba = resize::rgba8(&px.rgba, px.w, px.h, w, h);
     Ok(Pixels { w, h, rgba })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::same_shape;
+
+    #[test]
+    fn shapes() {
+        assert!(same_shape((3000, 2000), (3000, 2000)));
+        assert!(same_shape((2560, 1707), (3000, 2000)));
+        assert!(same_shape((480, 640), (3000, 4000)));
+        assert!(!same_shape((2000, 3000), (3000, 2000)));
+        assert!(!same_shape((3000, 1500), (3000, 2000)));
+        assert!(same_shape((500, 500), (2000, 2000)));
+    }
 }

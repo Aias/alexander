@@ -31,6 +31,6 @@ fn main() {
     engine.render(&mut photo, &plan);
     let (_, _, rgba) = engine.read_display(&mut photo, &plan.view);
     eprintln!("{name}: {w}x{h} in {:.0} ms (flags: {})", start.elapsed().as_secs_f64() * 1000.0, s.cli_flags());
-    let grey: Vec<u16> = rgba.chunks_exact(4).map(|p| (p[1].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16).collect();
+    let grey: Vec<u16> = rgba.as_chunks::<4>().0.iter().map(|p| (p[1].clamp(0.0, 1.0) * 65535.0 + 0.5) as u16).collect();
     image::ImageBuffer::<image::Luma<u16>, _>::from_raw(w, h, grey).unwrap().save(&args[2]).expect("output");
 }

@@ -68,7 +68,7 @@ fn remove_never_touches_disk_and_moves_focus() {
     let (mut l, id) = lib(5);
     l.click(id[1]);
     l.toggle(id[2]);
-    let gone: BTreeSet<u64> = l.selected.clone();
+    let gone: BTreeSet<u64> = l.selected().clone();
     l.remove(&gone);
     assert_eq!(l.len(), 3);
     assert!(l.get(id[1]).is_none());
@@ -190,7 +190,7 @@ fn opening_turns_upright_and_makes_a_proxy() {
     assert_eq!((full.w, full.h), (2560, 1440));
     assert_eq!(load::grid_long(0, (1600, 900), 16384), 1600);
     assert_eq!(load::grid_long(0, (30000, 900), 16384), 16384);
-    assert_eq!(load::collect(std::slice::from_ref(&dir)), vec![p]);
+    assert_eq!(load::collect(std::slice::from_ref(&dir)), vec![std::fs::canonicalize(&p).unwrap()]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -213,5 +213,62 @@ fn exif_orientation_is_honoured() {
     // the top of the stored picture is now on the right
     let at = |x: u32, y: u32| o.proxy.rgba[((y * o.proxy.w + x) * 4) as usize];
     assert!(at(o.proxy.w - 2, 20) > 200 && at(1, 20) < 60);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn paths_index_and_revision() {
+    let (mut l, id) = lib(3);
+    let r = l.revision();
+    l.click(id[1]);
+    assert_ne!(l.revision(), r);
+    l.set_path(id[1], PathBuf::from("/q/orig.jpg"));
+    assert_eq!(l.find_path(&PathBuf::from("/q/orig.jpg")), Some(id[1]));
+    assert_eq!(l.find_path(&PathBuf::from("/p/1.jpg")), None);
+    assert_eq!(l.get(id[1]).unwrap().name, "orig.jpg");
+    assert!(l.add(PathBuf::from("/q/orig.jpg")).is_none());
+    l.remove(&[id[1]].into());
+    assert_eq!(l.find_path(&PathBuf::from("/q/orig.jpg")), None);
+    assert!(l.add(PathBuf::from("/q/orig.jpg")).is_some());
+}
+
+#[test]
+fn records_that_do_not_fit_are_not_followed() {
+    let dir = std::env::temp_dir().join(format!("studio-records-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = std::fs::canonicalize(&dir).unwrap();
+    let other = dir.join("other.png");
+    image::RgbImage::from_pixel(90, 90, image::Rgb([10, 20, 30])).save(&other).unwrap();
+    let pic = Picture { w: 60, h: 40, rgba: vec![0.5; 60 * 40 * 4] };
+    // a record naming a photo of another shape: the file opens as itself
+    let out = dir.join("odd-twb.png");
+    export::write(&pic, Size::Grid, 0, Format::Png8, &Record { source: other.clone(), look: Settings::default() }, &out).unwrap();
+    let opened = load::open(&out).unwrap();
+    assert_eq!((opened.path.clone(), opened.look.is_none()), (out.clone(), true));
+    // a relative source is never looked up in the working directory
+    let out2 = dir.join("rel-twb.png");
+    export::write(&pic, Size::Grid, 0, Format::Png8, &Record { source: "Cargo.toml".into(), look: Settings::default() }, &out2).unwrap();
+    assert!(provenance::resolve(&out2).is_none());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn exposure_is_measured_at_the_simulation_grid() {
+    // the levels twb2.py measures are those of the photo resized to the grid, not of the proxy
+    let dir = std::env::temp_dir().join(format!("studio-levels-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("fine.png");
+    let (w, h) = (3200u32, 2000u32);
+    let img = image::RgbImage::from_fn(w, h, |x, y| {
+        // fine bright detail that a 640 px copy smooths away
+        let v = if (x / 2 + y / 2) % 7 == 0 { 250 } else { ((x * 160) / w + 40) as u8 };
+        image::Rgb([v, v, v])
+    });
+    img.save(&p).unwrap();
+    let o = load::open(&p).unwrap();
+    let px = load::full(&p, 2560).unwrap();
+    let weights = alexander_studio::film::Film::load(alexander_studio::film::FilmKind::ALL[0]).weights[0];
+    let want = alexander_studio::tone::exposure_levels(&px.rgba, px.w as usize, px.h as usize, weights);
+    assert_eq!(o.levels[0][0], want);
     std::fs::remove_dir_all(&dir).unwrap();
 }

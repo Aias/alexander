@@ -86,8 +86,9 @@ fn read_jpeg(mut f: impl Read) -> Option<Record> {
 }
 
 /// The original a file should be opened as, with its look: the recorded source when the
-/// file is an export of ours and that source is still there.
+/// file is an export of ours and that source is still there. A relative source is never
+/// followed: it would mean whatever file sits at that name in the working directory.
 pub fn resolve(path: &Path) -> Option<Record> {
     let r = read(path)?;
-    (r.source != path && r.source.is_file()).then_some(r)
+    (r.source.is_absolute() && r.source != path && r.source.is_file()).then_some(r)
 }

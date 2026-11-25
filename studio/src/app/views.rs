@@ -11,6 +11,8 @@ const CELL: Color32 = Color32::from_gray(38);
 const CELL_SELECTED: Color32 = Color32::from_gray(58);
 const CELL_FOCUS: Color32 = Color32::from_gray(72);
 const FOCUS_LINE: Color32 = Color32::from_gray(170);
+/// Labels: quieter than values and controls, but read at better than 5:1 on the panel.
+pub const LABEL: Color32 = Color32::from_gray(150);
 
 pub fn style(ctx: &egui::Context) {
     let mut v = egui::Visuals::dark();
@@ -29,6 +31,8 @@ pub fn style(ctx: &egui::Context) {
     v.window_shadow = egui::Shadow::NONE;
     v.popup_shadow = egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(90) };
     v.hyperlink_color = Color32::from_gray(200);
+    // egui's plain text is 4.4:1 on the dialogs' fill; a little brighter reads comfortably
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0f32, Color32::from_gray(170));
     ctx.set_visuals(v);
     ctx.style_mut(|s| {
         s.spacing.item_spacing = vec2(6.0, 4.0);
@@ -67,7 +71,7 @@ impl App {
         let mut actions = Vec::new();
         self.toolbar(ctx);
         let has_photos = !self.lib.is_empty();
-        if has_photos && self.panel && self.lib.focus.is_some() && !self.lib.selected.is_empty() {
+        if has_photos && self.panel && self.lib.focus.is_some() && !self.lib.selected().is_empty() {
             egui::SidePanel::right("controls").exact_width(292.0).resizable(false).show(ctx, |ui| {
                 ui.add_space(6.0);
                 self.panel_ui(ui, &mut actions);
@@ -133,7 +137,7 @@ impl App {
                         ui.add(egui::ProgressBar::new(f).desired_width(120.0).desired_height(6.0));
                     }
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new(format!("{} / {}", self.lib.selected.len(), self.lib.len())).weak().small());
+                    ui.label(egui::RichText::new(format!("{} / {}", self.lib.selected().len(), self.lib.len())).color(LABEL).small());
                     if self.mode == Mode::Grid {
                         ui.add_space(8.0);
                         ui.spacing_mut().slider_width = 90.0;
@@ -188,7 +192,7 @@ impl App {
 
     fn thumb_cell(&mut self, ui: &mut Ui, id: Id, cell: Rect, rank_base: u8) {
         let ppp = ui.ctx().pixels_per_point();
-        let selected = self.lib.selected.contains(&id);
+        let selected = self.lib.selected().contains(&id);
         let focused = self.lib.focus == Some(id);
         let fill = if focused && selected {
             CELL_FOCUS
@@ -213,7 +217,7 @@ impl App {
                 }
             }
             Status::Failed(_) => {
-                p.text(inner.center(), Align2::CENTER_CENTER, "!", FontId::proportional(16.0), Color32::from_gray(120));
+                p.text(inner.center(), Align2::CENTER_CENTER, "!", FontId::proportional(16.0), LABEL);
             }
             Status::Loading => {}
         }
@@ -470,6 +474,7 @@ impl App {
                     ui.add(egui::Label::new(name).truncate()).on_hover_text(form.dir.display().to_string());
                     if ui.button("Choose…").clicked() {
                         if let Some(d) = rfd::FileDialog::new().set_directory(&form.dir).pick_folder() {
+                            form.dir_ok = d.is_dir();
                             form.dir = d;
                         }
                     }
@@ -504,7 +509,7 @@ impl App {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let label = if n == 1 { "Export".to_string() } else { format!("Export {n}") };
-                    if ui.add_enabled(n > 0 && form.dir.is_dir(), egui::Button::new(label)).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) && n > 0 && form.dir.is_dir() {
+                    if ui.add_enabled(n > 0 && form.dir_ok, egui::Button::new(label)).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) && n > 0 && form.dir_ok {
                         go = true;
                     }
                     if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -526,7 +531,7 @@ impl App {
             return;
         }
         let mut close = false;
-        egui::Window::new("Could not save").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+        egui::Window::new("errors").title_bar(false).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
             for e in self.export_errors.iter().take(12) {
                 ui.label(e);
             }
