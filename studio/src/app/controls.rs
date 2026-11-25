@@ -6,7 +6,7 @@ use super::{App, Command};
 use alexander_studio::film::{Dev, FilmKind, Filter};
 use alexander_studio::params::{Frame, Repro, Settings, View};
 use egui::collapsing_header::CollapsingState;
-use egui::{pos2, vec2, Align, Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragValue, EventFilter, Key, Layout, Rect, RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, WidgetText};
+use egui::{pos2, vec2, Align, Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragValue, EventFilter, Key, Layout, Margin, Rect, RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, WidgetText};
 use std::ops::RangeInclusive;
 
 const LABEL_W: f32 = 116.0;
@@ -16,15 +16,16 @@ const RAIL: Color32 = Color32::from_gray(66);
 const HANDLE: Color32 = Color32::from_gray(205);
 const RULE: Color32 = Color32::from_gray(44);
 const HISTOGRAM: Color32 = Color32::from_gray(150);
+const EDGE: Margin = Margin { left: 0, right: 12, top: 0, bottom: 0 };
 
 impl App {
     pub(super) fn panel_ui(&mut self, ui: &mut Ui, actions: &mut Vec<Command>) {
         let focus = self.lib.focus.filter(|_| !self.lib.selected().is_empty()).and_then(|f| self.lib.get(f));
         let before = self.before();
-        histogram(ui, focus.and_then(|it| self.tiers.histogram(it, before)), &mut self.clipping);
+        egui::Frame::NONE.inner_margin(EDGE).show(ui, |ui| histogram(ui, focus.and_then(|it| self.tiers.histogram(it, before)), &mut self.clipping));
         if self.cropping.is_some() {
             ui.add_space(10.0);
-            self.crop_ui(ui);
+            egui::Frame::NONE.inner_margin(EDGE).show(ui, |ui| self.crop_ui(ui));
             return;
         }
         let processed = focus.is_some_and(|it| it.look.is_some());
@@ -32,13 +33,13 @@ impl App {
         let enabled = focus.is_some();
         let can_paste = self.clipboard.is_some();
         ui.add_space(10.0);
-        ui.add_enabled_ui(enabled, |ui| header(ui, processed, actions));
+        egui::Frame::NONE.inner_margin(EDGE).show(ui, |ui| ui.add_enabled_ui(enabled, |ui| header(ui, processed, actions)));
         ui.add_space(6.0);
-        egui::Panel::bottom("look").frame(egui::Frame::NONE.inner_margin(egui::Margin { top: 8, ..Default::default() })).show(ui, |ui| {
+        egui::Panel::bottom("look").frame(egui::Frame::NONE.inner_margin(Margin { top: 8, ..EDGE })).show(ui, |ui| {
             ui.add_enabled_ui(enabled, |ui| footer(ui, processed, can_paste, actions));
         });
         let before = s.clone();
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().auto_shrink([false, false]).content_margin(EDGE).show(ui, |ui| {
             ui.add_enabled_ui(enabled, |ui| {
                 self.presets_ui(ui);
                 knobs(ui, &mut s);
@@ -242,8 +243,9 @@ fn check(ui: &mut Ui, label: &str, tip: &str, v: &mut bool, default: bool) {
 
 /// A heading over a rule across the panel, brighter under the pointer when it can be clicked.
 pub(super) fn title(ui: &mut Ui, name: &str, sense: Sense) -> (Rect, egui::Response) {
-    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), sense);
+    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), sense);
     ui.painter().hline(rect.x_range(), rect.top(), Stroke::new(1.0f32, RULE));
+    let rect = rect.translate(vec2(0.0, ui.spacing().item_spacing.y / 2.0));
     ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, name, title_font(), if r.hovered() && sense.senses_click() { Color32::WHITE } else { TEXT });
     (rect, r)
 }
@@ -266,7 +268,7 @@ pub(super) fn section(ui: &mut Ui, name: &str, open: bool, switch: Option<&mut b
     });
     state.show_body_unindented(ui, |ui| {
         ui.add_enabled_ui(on, add);
-        ui.add_space(8.0);
+        ui.add_space(12.0);
     });
 }
 

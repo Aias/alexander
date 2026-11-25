@@ -32,7 +32,7 @@ pub fn style(ctx: &egui::Context) {
     #[cfg(target_os = "macos")]
     if let Ok(sf) = std::fs::read("/System/Library/Fonts/SFNS.ttf") {
         let sf = egui::FontData::from_owned(sf);
-        for (name, weight) in [("SF", 400.0), ("SF Label", 450.0), ("SF Title", 500.0)] {
+        for (name, weight) in [("SF", 400.0), ("SF Label", 430.0), ("SF Title", 500.0)] {
             let mut tweak = egui::FontTweak::default();
             tweak.coords.push(b"wght", weight);
             tweak.coords.push(b"opsz", 17.0);
@@ -146,16 +146,16 @@ impl App {
         let mut actions = Vec::new();
         self.toolbar(ui);
         let has_photos = !self.lib.is_empty();
-        if has_photos && self.mode != Mode::Grid {
-            egui::Panel::bottom("filmstrip").exact_size(92.0).frame(egui::Frame::NONE.fill(BAR)).show(ui, |ui| self.filmstrip(ui));
-        }
         if has_photos {
             let frame = egui::Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(6, 10));
             egui::Panel::right("rail").exact_size(44.0).resizable(false).frame(frame).show(ui, |ui| self.rail(ui));
         }
         if has_photos && self.panel {
-            let frame = egui::Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 10));
+            let frame = egui::Frame::side_top_panel(ui.style()).inner_margin(Margin { left: 12, right: 0, top: 10, bottom: 10 });
             egui::Panel::right("controls").resizable(true).default_size(340.0).size_range(320.0..=460.0).frame(frame).show(ui, |ui| self.panel_ui(ui, &mut actions));
+        }
+        if has_photos && self.mode != Mode::Grid {
+            egui::Panel::bottom("filmstrip").exact_size(92.0).frame(egui::Frame::NONE.fill(BAR)).show(ui, |ui| self.filmstrip(ui));
         }
         let area = egui::CentralPanel::default().frame(egui::Frame::NONE.fill(VIEW_BG)).show(ui, |ui| {
             if has_photos {
@@ -489,7 +489,7 @@ impl App {
             return;
         }
         let ppp = ui.ctx().pixels_per_point();
-        let area = ui.max_rect().shrink(12.0);
+        let area = ui.max_rect().shrink(18.0);
         let aspect = {
             let a: Vec<f32> = ids.iter().filter_map(|&id| self.lib.get(id)).filter(|it| it.original.1 > 0).map(|it| self.tiers.shown(it).1).map(|(w, h)| w as f32 / h as f32).collect();
             if a.is_empty() {
@@ -521,7 +521,7 @@ impl App {
             if !item.ready() {
                 continue;
             }
-            let inner = cell.shrink(8.0);
+            let inner = cell.shrink(2.0);
             let b = px(inner, ppp);
             let (bw, bh) = ((b[2] - b[0]).max(1) as f32, (b[3] - b[1]).max(1) as f32);
             let (origin, (gw, gh), angle) = self.tiers.shown(item);
@@ -539,7 +539,7 @@ impl App {
             }
             self.divider(ui, id, img, false);
             if focused && ids.len() > 1 {
-                ui.painter().rect_stroke(img.expand(4.0), CornerRadius::ZERO, Stroke::new(1.5f32, FOCUS_LINE), StrokeKind::Inside);
+                ui.painter().rect_stroke(img.expand(2.0), CornerRadius::ZERO, Stroke::new(1.5f32, FOCUS_LINE), StrokeKind::Middle);
             }
         }
     }
