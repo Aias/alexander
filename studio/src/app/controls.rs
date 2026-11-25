@@ -1,15 +1,15 @@
 //! The controls panel: the histogram, the process switch, the knobs in sections and the
 //! look commands. It edits one `Settings`; the change is carried over to every selected photo.
 
-use super::views::{segmented, LABEL, TEXT, VIEW_BG};
+use super::views::{label_family, segmented, title_font, LABEL, TEXT, VIEW_BG};
 use super::{App, Command};
 use alexander_studio::film::{Dev, FilmKind, Filter};
 use alexander_studio::params::{Frame, Repro, Settings, View};
 use egui::collapsing_header::CollapsingState;
-use egui::{pos2, vec2, Align, Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragValue, EventFilter, FontId, Key, Layout, Rect, RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, WidgetText};
+use egui::{pos2, vec2, Align, Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragValue, EventFilter, Key, Layout, Rect, RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, WidgetText};
 use std::ops::RangeInclusive;
 
-const LABEL_W: f32 = 104.0;
+const LABEL_W: f32 = 116.0;
 const VALUE_W: f32 = 44.0;
 const HANDLE_R: f32 = 5.0;
 const RAIL: Color32 = Color32::from_gray(66);
@@ -98,8 +98,7 @@ fn header(ui: &mut Ui, processed: bool, actions: &mut Vec<Command>) {
         if on != processed {
             actions.push(Command::Process(Some(on)));
         }
-        ui.spacing_mut().interact_size.y = 26.0;
-        ui.menu_button("…", |ui| {
+        let (r, _) = egui::containers::menu::MenuButton::from_button(Button::new("").min_size(vec2(26.0, 26.0))).ui(ui, |ui| {
             ui.set_min_width(200.0);
             let mut item = |ui: &mut Ui, text: &str, enabled: bool, a: Command| {
                 if ui.add_enabled(enabled, Button::new(text)).clicked() {
@@ -111,6 +110,10 @@ fn header(ui: &mut Ui, processed: bool, actions: &mut Vec<Command>) {
             item(ui, "Load Look…", true, Command::LoadLook);
             item(ui, "Copy as twb2.py Flags", processed, Command::CopyFlags);
         });
+        let colour = ui.style().interact(&r).fg_stroke.color;
+        for dx in [-5.0, 0.0, 5.0] {
+            ui.painter().circle_filled(r.rect.center() + vec2(dx, 0.0), 1.4, colour);
+        }
     });
 }
 
@@ -176,7 +179,7 @@ fn name(ui: &mut Ui, label: &str, tip: &str, changed: bool) -> bool {
     if link {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
-    let text = RichText::new(label).color(if link { TEXT } else { LABEL });
+    let text = RichText::new(label).family(label_family()).color(if link { TEXT } else { LABEL });
     let galley = WidgetText::from(if link { text.underline() } else { text }).into_galley(ui, Some(TextWrapMode::Truncate), rect.width(), TextStyle::Body);
     ui.painter().galley(pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, LABEL);
     let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
@@ -241,7 +244,7 @@ fn check(ui: &mut Ui, label: &str, tip: &str, v: &mut bool, default: bool) {
 pub(super) fn title(ui: &mut Ui, name: &str, sense: Sense) -> (Rect, egui::Response) {
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), sense);
     ui.painter().hline(rect.x_range(), rect.top(), Stroke::new(1.0f32, RULE));
-    ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, name, FontId::proportional(12.5), if r.hovered() && sense.senses_click() { Color32::WHITE } else { TEXT });
+    ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, name, title_font(), if r.hovered() && sense.senses_click() { Color32::WHITE } else { TEXT });
     (rect, r)
 }
 

@@ -4,7 +4,7 @@ use super::{App, Command, Compare, Mode};
 use alexander_studio::engine::Canvas;
 use alexander_studio::library::{Id, Item, Status};
 use egui::text::{LayoutJob, TextWrapping};
-use egui::{pos2, vec2, Align2, Button, Color32, CornerRadius, CursorIcon, FontId, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
+use egui::{pos2, vec2, Align2, Button, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 
 pub const VIEW_BG: Color32 = Color32::from_gray(22);
 pub const BAR: Color32 = Color32::from_gray(29);
@@ -17,14 +17,34 @@ const FOCUS_LINE: Color32 = Color32::from_gray(170);
 pub const LABEL: Color32 = Color32::from_gray(150);
 pub const TEXT: Color32 = Color32::from_gray(222);
 
+/// The panel's section titles, a little heavier than the text.
+pub fn title_font() -> FontId {
+    FontId::new(12.5, FontFamily::Name("Title".into()))
+}
+
+/// The names of the panel's settings, between the text and the titles.
+pub fn label_family() -> FontFamily {
+    FontFamily::Name("Label".into())
+}
+
 pub fn style(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
     #[cfg(target_os = "macos")]
     if let Ok(sf) = std::fs::read("/System/Library/Fonts/SFNS.ttf") {
-        let mut fonts = egui::FontDefinitions::default();
-        fonts.font_data.insert("SF".into(), std::sync::Arc::new(egui::FontData::from_owned(sf)));
-        fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "SF".into());
-        ctx.set_fonts(fonts);
+        let sf = egui::FontData::from_owned(sf);
+        for (name, weight) in [("SF", 400.0), ("SF Label", 450.0), ("SF Title", 500.0)] {
+            let mut tweak = egui::FontTweak::default();
+            tweak.coords.push(b"wght", weight);
+            tweak.coords.push(b"opsz", 17.0);
+            fonts.font_data.insert(name.into(), std::sync::Arc::new(sf.clone().tweak(tweak)));
+        }
     }
+    let rest = fonts.families[&FontFamily::Proportional].clone();
+    for (family, face) in [(FontFamily::Proportional, "SF"), (label_family(), "SF Label"), (title_font().family, "SF Title")] {
+        let faces = fonts.font_data.contains_key(face).then(|| face.to_string()).into_iter().chain(rest.iter().cloned()).collect();
+        fonts.families.insert(family, faces);
+    }
+    ctx.set_fonts(fonts);
     let mut v = egui::Visuals::dark();
     v.panel_fill = Color32::from_gray(34);
     v.window_fill = Color32::from_gray(40);
@@ -174,6 +194,7 @@ impl App {
         if self.rail_button(ui, 0, self.panel && self.cropping.is_none(), true, "Edit") {
             if self.cropping.is_some() {
                 self.finish_crop();
+                self.panel = true;
             } else {
                 self.panel = !self.panel;
             }

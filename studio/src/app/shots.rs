@@ -143,7 +143,7 @@ impl Shots {
                 app.reference.shown = true;
                 self.step += 1;
             }
-            21 if settled => self.shot(ctx, "11-crop-reference"),
+            21 if settled && self.idle >= 90 => self.shot(ctx, "11-crop-reference"),
             22 => {
                 app.cropping = None;
                 app.reference.shown = false;
