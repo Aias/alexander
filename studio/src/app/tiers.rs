@@ -13,6 +13,7 @@ use alexander_studio::load::{self, Pixels};
 use alexander_studio::params::{Settings, View};
 use alexander_studio::plan::{Plan, Planner, ViewPlan};
 use egui::TextureId;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -23,6 +24,8 @@ const THUMB_BUDGET: u64 = 192 << 20;
 /// Time spent on renders other than the focused photo's in one frame.
 const FRAME_BUDGET: Duration = Duration::from_millis(12);
 const HISTOGRAM_BINS: usize = 128;
+/// Look generations of previews start here, above any a photo reaches by editing.
+const PREVIEW_GEN: u64 = 1 << 62;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tier {
@@ -68,7 +71,7 @@ struct DrawKey {
     /// screen while the new one is made.
     complete: bool,
     gen: u64,
-    canvas: [u32; 5],
+    canvas: [u32; 7],
     size: [u32; 2],
 }
 
@@ -121,6 +124,9 @@ pub struct Tiers {
     pub trace: bool,
     /// The photo, look generation and whether the photo itself is shown, and the counts.
     histogram: Option<((Id, u64, bool), Vec<f32>)>,
+    /// A look shown on one photo without being given to it, and the generation it renders as.
+    preview: Option<(Id, Settings, u64)>,
+    previews: u64,
 }
 
 pub fn default_view() -> ViewPlan {
@@ -145,6 +151,8 @@ impl Tiers {
             last_focus_stage: None,
             trace: std::env::var("STUDIO_TRACE").is_ok(),
             histogram: None,
+            preview: None,
+            previews: 0,
         }
     }
 
@@ -164,18 +172,36 @@ impl Tiers {
 
     /// The part of the full grid a view shows: its top-left corner and size. The picture
     /// inside the border when the look strips it, otherwise the whole grid.
-    pub fn shown(&self, item: &Item) -> ([f32; 2], (u32, u32)) {
+    pub fn shown(&self, item: &Item) -> ([f32; 2], (u32, u32), f32) {
         within(item, self.grid_size(item))
+    }
+
+    /// Show `look` on photo `id` in its renders without giving it to the photo, or stop.
+    pub fn set_preview(&mut self, preview: Option<(Id, Settings)>) {
+        if preview.as_ref().map(|(i, l)| (i, l)) != self.preview.as_ref().map(|(i, l, _)| (i, l)) {
+            self.previews += 1;
+            self.preview = preview.map(|(i, l)| (i, l, PREVIEW_GEN + self.previews));
+        }
+    }
+
+    /// `item` as its renders show it: with the previewed look when it is the photo previewed.
+    fn shown_item<'a>(&self, item: &'a Item) -> Cow<'a, Item> {
+        match &self.preview {
+            Some((id, look, gen)) if *id == item.id => Cow::Owned(Item { look: Some(look.clone()), gen: *gen, ..item.clone() }),
+            _ => Cow::Borrowed(item),
+        }
     }
 
     // ---------- asked for during layout ---------------------------------------------------
 
-    /// A thumbnail of `item` for a box of `max` physical pixels: its texture (drawn at
-    /// some size, maybe an older look) and the size it should be shown at.
-    pub fn thumb(&mut self, item: &Item, max: [u32; 2], rank: u8) -> (Option<TextureId>, [u32; 2]) {
+    /// A thumbnail of `item` for a box of `max` physical pixels, fitting inside it or, with
+    /// `fill`, covering it: its texture (drawn at some size, maybe an older look) and the
+    /// size it should be shown at.
+    pub fn thumb(&mut self, item: &Item, max: [u32; 2], fill: bool, rank: u8) -> (Option<TextureId>, [u32; 2]) {
         let Some(p) = &item.proxy else { return (None, [0, 0]) };
-        let (_, (pw, ph)) = within(item, (p.w, p.h));
-        let s = (max[0] as f32 / pw as f32).min(max[1] as f32 / ph as f32);
+        let (_, (pw, ph), _) = within(item, (p.w, p.h));
+        let (sx, sy) = (max[0] as f32 / pw as f32, max[1] as f32 / ph as f32);
+        let s = if fill { sx.max(sy) } else { sx.min(sy) };
         let size = [((pw as f32 * s).round() as u32).clamp(1, pw.max(1) * 2), ((ph as f32 * s).round() as u32).clamp(1, ph.max(1) * 2)];
         self.requests.push(Request { id: item.id, want: Want::Thumb, size, rank });
         (self.thumbs.get(&item.id).filter(|t| t.key.is_some()).map(|t| t.id), size)
@@ -244,6 +270,8 @@ impl Tiers {
         let mut first = true;
         for r in &requests {
             let Some(item) = lib.get(r.id) else { continue };
+            let shown = self.shown_item(item);
+            let item = &*shown;
             if item.proxy.is_none() {
                 continue;
             }
@@ -376,7 +404,7 @@ impl Tiers {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
         });
         let view = texture.create_view(&Default::default());
         (texture, view)
@@ -397,17 +425,18 @@ impl Tiers {
         let resized = map.get(&id).is_none_or(|s| s.size != size);
         if resized {
             let (texture, tview) = self.surface(size);
+            let shown = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(wgpu::TextureFormat::Rgba8Unorm), ..Default::default() });
             let map = if thumbs { &mut self.thumbs } else { &mut self.canvases };
             match map.get_mut(&id) {
                 Some(s) => {
-                    self.renderer.write().update_egui_texture_from_wgpu_texture(&self.device, &tview, filter, s.id);
+                    self.renderer.write().update_egui_texture_from_wgpu_texture(&self.device, &shown, filter, s.id);
                     s.texture.destroy();
                     s.texture = texture;
                     s.view = tview;
                     s.size = size;
                 }
                 None => {
-                    let tid = self.renderer.write().register_native_texture(&self.device, &tview, filter);
+                    let tid = self.renderer.write().register_native_texture(&self.device, &shown, filter);
                     map.insert(id, Surface { texture, view: tview, id: tid, size, key: None, used: frame });
                 }
             }
@@ -527,6 +556,7 @@ impl Tiers {
     /// The finished picture of `item` at its full grid, as display values, for export.
     /// None until the full grid has arrived (it is then asked for).
     pub fn export_pixels(&mut self, item: &Item, planner: &mut Planner) -> Result<Option<Display>, Vec<(Id, u32)>> {
+        let grid = self.grid_size(item);
         let long = self.grid_long(item);
         let Some(look) = &item.look else { return Ok(None) };
         match self.fulls.get_mut(&item.id) {
@@ -537,7 +567,9 @@ impl Tiers {
                 let view = plan.view.clone();
                 res.plan = Some(plan);
                 res.gen = Some(item.gen);
-                Ok(Some(self.engine.read_display(&mut res.photo, &view, 1)))
+                let (origin, (w, h), angle) = within(item, grid);
+                let canvas = Canvas { origin, scale: 1.0, source: Canvas::RENDER, clip: false, angle };
+                Ok(Some((w, h, self.engine.read_canvas(&mut res.photo, &view, &canvas, w, h))))
             }
             _ => {
                 if self.loading.contains(&(item.id, long)) {
@@ -552,22 +584,21 @@ impl Tiers {
     /// How often each display value is shown, in `HISTOGRAM_BINS` bins from black to white:
     /// counted on the proxy's render of the look, or on the proxy itself, inside the crop.
     pub fn histogram(&mut self, item: &Item, before: bool) -> Option<&[f32]> {
+        let shown = self.shown_item(item);
+        let item = &*shown;
         let source = before || item.look.is_none();
         let key = (item.id, item.gen, source);
         if self.histogram.as_ref().is_none_or(|h| h.0 != key) {
-            let p = item.proxy.clone()?;
-            let (w, h, values) = if source {
-                (p.w, p.h, p.rgba.iter().map(|&b| b as f32 / 255.0).collect())
-            } else {
-                self.ensure(Tier::Proxy, item, true, false);
-                let res = self.proxies.get_mut(&item.id)?;
-                let view = Self::view_of(res, item);
-                self.engine.read_display(&mut res.photo, &view, 2)
-            };
-            let [x0, y0, x1, y1] = item.crop().map_or([0, 0, w, h], |a| a.pixels(w, h));
+            item.proxy.as_ref()?;
+            self.ensure(Tier::Proxy, item, true, false);
+            let res = self.proxies.get_mut(&item.id)?;
+            let view = Self::view_of(res, item);
+            let (origin, (w, h), angle) = within(item, res.photo.size());
+            let canvas = Canvas { origin, scale: 2.0, source: if source { Canvas::PHOTO } else { Canvas::RENDER }, clip: false, angle };
+            let values = self.engine.read_canvas(&mut res.photo, &view, &canvas, w.div_ceil(2), h.div_ceil(2));
             let mut bins = vec![0.0; HISTOGRAM_BINS];
-            for i in (y0..y1).flat_map(|y| (x0..x1).map(move |x| 4 * (y * w + x) as usize)) {
-                let luma = 0.2126 * values[i] + 0.7152 * values[i + 1] + 0.0722 * values[i + 2];
+            for v in values.chunks(4).filter(|v| v[3] > 0.0) {
+                let luma = 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
                 bins[(luma.clamp(0.0, 1.0) * (HISTOGRAM_BINS - 1) as f32).round() as usize] += 1.0;
             }
             self.histogram = Some((key, bins));
@@ -589,26 +620,28 @@ pub type Display = (u32, u32, Vec<f32>);
 fn scaled(canvas: Canvas, pw: u32, grid: (u32, u32), photo: bool) -> Canvas {
     let k = pw as f32 / grid.0 as f32;
     let source = if photo { Canvas::PHOTO } else { canvas.source };
-    Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, source }
+    Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, source, ..canvas }
 }
 
-/// The part of a `size` picture of `item` that is shown: top-left corner and size.
-fn within(item: &Item, size: (u32, u32)) -> ([f32; 2], (u32, u32)) {
+/// The part of a `size` picture of `item` that is shown: the top-left corner and size of its
+/// frame in the picture's pixels, and the angle in radians the picture turns under it.
+fn within(item: &Item, size: (u32, u32)) -> ([f32; 2], (u32, u32), f32) {
     match item.crop() {
-        Some(a) => {
-            let [x0, y0, x1, y1] = a.pixels(size.0, size.1);
-            ([x0 as f32, y0 as f32], ((x1 - x0).max(1), (y1 - y0).max(1)))
+        Some(c) => {
+            let at = |f: f64, n: u32| (f * n as f64).round().clamp(0.0, n as f64) as u32;
+            let (x0, y0, x1, y1) = (at(c.left, size.0), at(c.top, size.1), at(c.right, size.0), at(c.bottom, size.1));
+            ([x0 as f32, y0 as f32], ((x1 - x0).max(1), (y1 - y0).max(1)), c.angle.to_radians() as f32)
         }
-        None => ([0.0, 0.0], size),
+        None => ([0.0, 0.0], size, 0.0),
     }
 }
 
 /// A thumbnail of `size` drawn from the proxy, of `proxy` pixels.
 fn thumb_canvas(item: &Item, proxy: (u32, u32), size: [u32; 2], source: bool) -> Canvas {
-    let (origin, (w, _)) = within(item, proxy);
-    Canvas { origin, scale: w as f32 / size[0] as f32, source: if source { Canvas::PHOTO } else { Canvas::RENDER } }
+    let (origin, (w, _), angle) = within(item, proxy);
+    Canvas { origin, scale: w as f32 / size[0] as f32, source: if source { Canvas::PHOTO } else { Canvas::RENDER }, clip: false, angle }
 }
 
-fn canvas_bits(c: &Canvas) -> [u32; 5] {
-    [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits(), c.source[0].to_bits(), c.source[1].to_bits()]
+fn canvas_bits(c: &Canvas) -> [u32; 7] {
+    [c.origin[0].to_bits(), c.origin[1].to_bits(), c.scale.to_bits(), c.source[0].to_bits(), c.source[1].to_bits(), c.clip as u32, c.angle.to_bits()]
 }

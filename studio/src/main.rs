@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 fn main() -> eframe::Result {
     let paths: Vec<std::path::PathBuf> = std::env::args_os().skip(1).map(Into::into).collect();
+    #[cfg(target_os = "macos")]
+    app::finder::listen();
     let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
     if let egui_wgpu::WgpuSetup::CreateNew(create) = &mut wgpu_options.wgpu_setup {
         create.device_descriptor = Arc::new(|adapter: &wgpu::Adapter| {
@@ -18,6 +20,7 @@ fn main() -> eframe::Result {
                 // large photos at their own size want textures past eframe's 8192
                 required_limits: wgpu::Limits { max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.min(16384), ..base },
                 memory_hints: wgpu::MemoryHints::Performance,
+                ..Default::default()
             }
         });
     }

@@ -3,7 +3,7 @@
 
 use crate::film::{FilmKind, Filter};
 use crate::frame::Area;
-use crate::params::{Frame, Settings};
+use crate::params::{Crop, Frame, Settings};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -34,8 +34,11 @@ pub fn film_index(k: FilmKind) -> usize {
     FilmKind::ALL.iter().position(|&f| f == k).unwrap_or(0)
 }
 
+#[derive(Clone)]
 pub struct Item {
     pub id: Id,
+    /// 0 for the photo itself; 1 and up for its virtual copies, numbered as they were made.
+    pub copy: u32,
     pub path: PathBuf,
     pub name: String,
     pub status: Status,
@@ -51,6 +54,7 @@ pub struct Item {
     pub stash: Option<Settings>,
     /// Bumped whenever `look` changes, so renders can tell they are stale without comparing settings.
     pub gen: u64,
+    pub starred: bool,
 }
 
 impl Item {
@@ -76,19 +80,25 @@ impl Item {
         }
     }
 
-    /// The part of the photo shown and exported: the picture area when the look strips the
-    /// border, otherwise None for the whole.
-    pub fn crop(&self) -> Option<Area> {
+    /// The part of the photo shown and exported: the look's crop, else the picture inside the
+    /// border when the look strips it, otherwise None for the whole.
+    pub fn crop(&self) -> Option<Crop> {
         let look = self.look.as_ref()?;
-        if look.frame == Frame::Strip {
-            self.area(look)
-        } else {
-            None
-        }
+        let strip = self.area(look).filter(|_| look.frame == Frame::Strip);
+        look.crop.or(strip.map(|a| Crop { left: a.left, top: a.top, right: a.right, bottom: a.bottom, angle: 0.0 }))
     }
 
     pub fn ready(&self) -> bool {
         self.status == Status::Ready
+    }
+
+    /// The file's name, and which copy this is for a virtual copy.
+    pub fn title(&self) -> String {
+        if self.copy == 0 {
+            self.name.clone()
+        } else {
+            format!("{} · Copy {}", self.name, self.copy)
+        }
     }
 }
 
@@ -117,6 +127,10 @@ pub struct Library {
     selected: BTreeSet<Id>,
     pub focus: Option<Id>,
     anchor: Option<Id>,
+    starred_only: bool,
+    /// The photos the views show, in library order: every photo, or only the starred ones.
+    shown: Vec<Id>,
+    shown_index: HashMap<Id, usize>,
     undo: Vec<Step>,
     redo: Vec<Step>,
 }
@@ -180,14 +194,24 @@ impl Library {
         if self.find_path(&path).is_some() {
             return None;
         }
+        Some(self.restore(path, 0, None, None, false))
+    }
+
+    /// Add a photo remembered from an earlier session, with its copy number, its looks and
+    /// its star, at the end of the library. It opens like a photo just added.
+    pub fn restore(&mut self, path: PathBuf, copy: u32, look: Option<Settings>, stash: Option<Settings>, starred: bool) -> Id {
         let id = self.next_id;
         self.next_id += 1;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         self.rev += 1;
-        self.by_path.insert(path.clone(), id);
+        self.by_path.entry(path.clone()).or_insert(id);
         self.index.insert(id, self.items.len());
-        self.items.push(Item { id, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, frame: None, look: None, stash: None, gen: 0 });
-        Some(id)
+        if starred || !self.starred_only {
+            self.shown_index.insert(id, self.shown.len());
+            self.shown.push(id);
+        }
+        self.items.push(Item { id, copy, path, name, status: Status::Loading, original: (0, 0), proxy: None, levels: None, frame: None, look, stash, gen: 0, starred });
+        id
     }
 
     /// Take photos out of the library (never off the disk) so that undo can put them back.
@@ -205,7 +229,7 @@ impl Library {
         if ids.is_empty() {
             return Vec::new();
         }
-        let first = ids.iter().filter_map(|id| self.position(*id)).min();
+        let first = ids.iter().filter_map(|id| self.shown_position(*id)).min();
         self.rev += 1;
         let mut taken = Vec::new();
         for (i, mut it) in std::mem::take(&mut self.items).into_iter().enumerate() {
@@ -217,15 +241,13 @@ impl Library {
                 self.items.push(it);
             }
         }
-        self.by_path.retain(|_, id| !ids.contains(id));
         self.reindex();
         self.selected.retain(|id| !ids.contains(id));
         if self.focus.is_some_and(|f| ids.contains(&f)) {
             self.focus = None;
             if self.selected.is_empty() {
                 if let Some(i) = first {
-                    if !self.items.is_empty() {
-                        let id = self.items[i.min(self.items.len() - 1)].id;
+                    if let Some(&id) = self.shown.get(i.min(self.shown.len().saturating_sub(1))) {
                         self.selected.insert(id);
                         self.focus = Some(id);
                     }
@@ -245,17 +267,65 @@ impl Library {
         self.rev += 1;
         self.selected.clear();
         for (i, it) in items {
-            self.by_path.insert(it.path.clone(), it.id);
             self.selected.insert(it.id);
             self.items.insert(i.min(self.items.len()), it);
         }
         self.reindex();
         self.focus = self.selected.iter().next().copied();
         self.anchor = self.focus;
+        self.drop_hidden();
     }
 
+    /// Index the photos by id and by file, the first photo of a file standing for its copies.
     fn reindex(&mut self) {
         self.index = self.items.iter().enumerate().map(|(i, it)| (it.id, i)).collect();
+        self.by_path = self.items.iter().rev().map(|it| (it.path.clone(), it.id)).collect();
+        self.shown = self.items.iter().filter(|it| it.starred || !self.starred_only).map(|it| it.id).collect();
+        self.shown_index = self.shown.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+    }
+
+    /// Take the photos the views do not show out of the selection, the focus and the anchor.
+    fn drop_hidden(&mut self) {
+        self.selected.retain(|id| self.shown_index.contains_key(id));
+        if self.focus.is_some_and(|f| !self.shown_index.contains_key(&f)) {
+            self.focus = self.selected.iter().next().copied();
+        }
+        if self.anchor.is_some_and(|a| !self.shown_index.contains_key(&a)) {
+            self.anchor = self.focus;
+        }
+    }
+
+    /// The photos the views show, in library order.
+    pub fn shown(&self) -> &[Id] {
+        &self.shown
+    }
+
+    pub fn shown_position(&self, id: Id) -> Option<usize> {
+        self.shown_index.get(&id).copied()
+    }
+
+    pub fn starred_only(&self) -> bool {
+        self.starred_only
+    }
+
+    /// Show only the starred photos, or every photo. Photos hidden leave the selection.
+    pub fn set_starred_only(&mut self, on: bool) {
+        self.rev += 1;
+        self.starred_only = on;
+        self.reindex();
+        self.drop_hidden();
+    }
+
+    /// Star the photos, or take their stars away when every one of them has a star.
+    pub fn toggle_starred(&mut self, ids: &[Id]) {
+        let on = ids.iter().any(|&id| self.get(id).is_some_and(|it| !it.starred));
+        for &id in ids {
+            if let Some(it) = self.get_mut(id) {
+                it.starred = on;
+            }
+        }
+        self.reindex();
+        self.drop_hidden();
     }
 
     // ---------- selection ----------------------------------------------------------------
@@ -292,20 +362,28 @@ impl Library {
     /// Shift-click: everything from the anchor to this photo.
     pub fn extend(&mut self, id: Id) {
         self.rev += 1;
-        let Some(to) = self.position(id) else { return };
-        let from = self.anchor.and_then(|a| self.position(a)).unwrap_or(to);
+        let Some(to) = self.shown_position(id) else { return };
+        let from = self.anchor.and_then(|a| self.shown_position(a)).unwrap_or(to);
         let (a, b) = (from.min(to), from.max(to));
-        self.selected = self.items[a..=b].iter().map(|it| it.id).collect();
+        self.selected = self.shown[a..=b].iter().copied().collect();
         self.focus = Some(id);
     }
 
     pub fn select_all(&mut self) {
         self.rev += 1;
-        self.selected = self.items.iter().map(|it| it.id).collect();
+        self.selected = self.shown.iter().copied().collect();
         if self.focus.is_none() {
-            self.focus = self.items.first().map(|it| it.id);
+            self.focus = self.shown.first().copied();
             self.anchor = self.focus;
         }
+    }
+
+    /// Select `ids` among the photos shown, with the focus on `focus`.
+    pub fn set_selection(&mut self, ids: &[Id], focus: Option<Id>) {
+        self.rev += 1;
+        self.selected = ids.iter().copied().filter(|id| self.shown_index.contains_key(id)).collect();
+        self.focus = focus.filter(|f| self.selected.contains(f)).or_else(|| self.selected.first().copied());
+        self.anchor = self.focus;
     }
 
     pub fn select_none(&mut self) {
@@ -317,18 +395,18 @@ impl Library {
         self.selected.range(id..).next().or_else(|| self.selected.range(..id).next_back()).copied()
     }
 
-    /// Move the focus `delta` places through the library. With `extend` the selection
+    /// Move the focus `delta` places through the photos shown. With `extend` the selection
     /// grows from the anchor as with shift-click; otherwise the new photo is selected alone.
     pub fn step(&mut self, delta: isize, extend: bool) {
-        if self.items.is_empty() {
+        if self.shown.is_empty() {
             return;
         }
-        let cur = self.focus.and_then(|f| self.position(f));
+        let cur = self.focus.and_then(|f| self.shown_position(f));
         let next = match cur {
             None => 0,
-            Some(i) => (i as isize + delta).clamp(0, self.items.len() as isize - 1) as usize,
+            Some(i) => (i as isize + delta).clamp(0, self.shown.len() as isize - 1) as usize,
         };
-        let id = self.items[next].id;
+        let id = self.shown[next];
         if extend {
             if self.anchor.is_none() {
                 self.anchor = self.focus.or(Some(id));
@@ -357,7 +435,51 @@ impl Library {
 
     /// Selected photos in library order.
     pub fn selection(&self) -> Vec<Id> {
-        self.selected.iter().copied().collect()
+        let mut ids: Vec<Id> = self.selected.iter().copied().collect();
+        ids.sort_by_key(|&id| self.position(id));
+        ids
+    }
+
+    /// Make a virtual copy of each photo, with its look, after the photo and its other
+    /// copies, and select the copies. Undo takes them away. Returns the copies.
+    pub fn duplicate(&mut self, ids: &[Id]) -> Vec<Id> {
+        let mut made = Vec::new();
+        for &id in ids {
+            let Some(it) = self.get(id).filter(|it| it.ready()) else { continue };
+            let path = it.path.clone();
+            let mut copy = it.clone();
+            copy.id = self.next_id;
+            copy.copy = self.items.iter().filter(|o| o.path == path).map(|o| o.copy).max().unwrap_or(0) + 1;
+            copy.starred = false;
+            self.next_id += 1;
+            let after = self.items.iter().rposition(|o| o.path == path).unwrap_or(self.items.len() - 1);
+            made.push(copy.id);
+            self.items.insert(after + 1, copy);
+        }
+        if made.is_empty() {
+            return made;
+        }
+        self.rev += 1;
+        self.reindex();
+        self.selected = made.iter().copied().collect();
+        self.focus = made.first().copied();
+        self.anchor = self.focus;
+        self.push_undo(Step::Restored(made.clone()));
+        made
+    }
+
+    /// Show `look` on the photo `id` or a copy of it, as when an export of it is opened: on
+    /// the copy that has that look already, on the photo itself when it has no look, or else
+    /// on a new virtual copy. Returns the photo that shows it.
+    pub fn give_look(&mut self, id: Id, look: Settings) -> Id {
+        let Some(path) = self.get(id).map(|it| it.path.clone()) else { return id };
+        if let Some(same) = self.items.iter().find(|it| it.path == path && it.look.as_ref() == Some(&look)) {
+            return same.id;
+        }
+        let target = if self.get(id).is_some_and(|it| it.look.is_none()) { id } else { self.duplicate(&[id]).first().copied().unwrap_or(id) };
+        self.checkpoint(&[target]);
+        self.set_look(&[target], Some(look));
+        target
     }
 
     // ---------- looks ----------------------------------------------------------------------
@@ -382,7 +504,7 @@ impl Library {
         }
     }
 
-    fn restore(&mut self, snap: Snapshot) -> Snapshot {
+    fn restore_looks(&mut self, snap: Snapshot) -> Snapshot {
         self.rev += 1;
         let ids: Vec<Id> = snap.iter().map(|s| s.0).collect();
         let inverse = self.snapshot(&ids);
@@ -401,7 +523,7 @@ impl Library {
         match step {
             Step::Looks(s) => {
                 let ids = s.iter().map(|x| x.0).collect();
-                (Step::Looks(self.restore(s)), ids)
+                (Step::Looks(self.restore_looks(s)), ids)
             }
             Step::Removed(items) => {
                 let ids: Vec<Id> = items.iter().map(|(_, it)| it.id).collect();
@@ -507,7 +629,7 @@ macro_rules! sync_fields {
 pub fn sync_changed(before: &Settings, after: &Settings, target: &mut Settings) {
     // keep this list in step with `Settings`: tests/library check every field
     sync_fields!(before, after, target;
-        detail_px, seed, film, frame, film_mm, filter, lens_um, lens_exponent, halation, halation_um,
+        detail_px, seed, film, frame, crop, film_mm, filter, lens_um, lens_exponent, halation, halation_um,
         ev, auto_ev, auto_ev_target, dev, grain, grain_light, grain_dev, edge, edge_density, no_edge,
         grade, print_ev, print_grey, enlarger_um, house,
         copy_blur, copy_gain, copy_drop, copy_fill, copy_ink,

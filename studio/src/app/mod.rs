@@ -1,10 +1,21 @@
 //! The studio window: library, views, controls, import and export.
 
 mod chrome;
+mod commands;
 mod controls;
+mod crop;
+#[cfg(target_os = "macos")]
+pub mod finder;
+#[cfg(target_os = "macos")]
+mod menu;
 #[cfg(target_os = "macos")]
 mod photos;
+mod presets;
+mod reference;
+mod session;
 mod shots;
+#[cfg(target_os = "macos")]
+mod symbols;
 mod tiers;
 mod views;
 mod workers;
@@ -24,6 +35,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Poll, Wake, Waker};
+use commands::Command;
 use tiers::Tiers;
 use workers::{Done, Job, Workers};
 
@@ -38,11 +50,11 @@ pub enum Compare {
     Split,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
     Grid,
     Survey,
-    Loupe,
+    Detail,
 }
 
 /// What a file dialog's paths are for.
@@ -53,6 +65,7 @@ enum Dialog {
     ExportFolder,
     SaveLook,
     LoadLook,
+    Reference,
 }
 
 /// The paths a file dialog gives when it closes.
@@ -110,19 +123,23 @@ pub struct App {
     mode: Mode,
     panel: bool,
     thumb_pt: f32,
+    /// Grid and Survey: photos fill their cells, cut to them, rather than fit inside.
+    fill: bool,
     compare: Compare,
     /// Split: the divider's place across the picture, from 0 to 1, and whether the photo
     /// itself is on the right.
     split: f32,
     split_swap: bool,
+    /// Pure white and pure black are marked in Survey and Detail.
+    clipping: bool,
     /// A photo whose finished picture is being read back for the clipboard.
     copy_image: Option<(Id, Planner)>,
     clipboard: Option<Settings>,
     /// An edit to the looks is under way (a slider held): one undo step for all of it.
     edit_open: bool,
-    /// Loupe: None fits the photo; otherwise screen pixels per grid pixel.
+    /// Detail: None fits the photo; otherwise screen pixels per grid pixel.
     zoom: Option<f32>,
-    /// Loupe: the point of the photo at the middle of the view, as fractions.
+    /// Detail: the point of the photo at the middle of the view, as fractions.
     center: [f32; 2],
     scroll_to_focus: bool,
     grid_cols: usize,
@@ -139,6 +156,26 @@ pub struct App {
     last_fit: f32,
     /// Library revision and the count of exportable selected photos at it.
     exportable: (u64, usize),
+    /// The mark on a photo with a look: the SF Symbol for film where there is one.
+    film_mark: Option<egui::TextureHandle>,
+    /// The rail's icons: Edit, Crop and Reference.
+    rail_icons: [Option<egui::TextureHandle>; 3],
+    presets: Vec<presets::Preset>,
+    reference: reference::Reference,
+    /// A crop being drawn on the focused photo in Detail.
+    cropping: Option<crop::CropEdit>,
+    /// The name of a preset being made, while it is typed.
+    new_preset: Option<String>,
+    /// The preset under the pointer this frame, to show on the focused photo.
+    preview_wanted: Option<(Id, Settings)>,
+    #[cfg(target_os = "macos")]
+    menu: Option<menu::MenuBar>,
+    /// Folders photos were opened from, latest first, for Open Recent.
+    recent: Vec<PathBuf>,
+    /// Whether the session is remembered: not in a scripted run, which starts afresh.
+    remember: bool,
+    /// What the session's file last recorded, and when it was written.
+    saved: (session::Saved, std::time::Instant),
     /// The file dialog open, if any, and the paths it gives when it closes.
     dialog: Option<(Dialog, Paths)>,
     waker: Waker,
@@ -153,6 +190,9 @@ impl App {
         let ctx = cc.egui_ctx.clone();
         let workers = Workers::new(move || ctx.request_repaint());
         let shots = shots::Shots::from_env(paths.clone());
+        let remember = shots.is_none();
+        #[cfg(target_os = "macos")]
+        finder::wake(&cc.egui_ctx);
         let mut app = App {
             lib: Library::new(),
             tiers,
@@ -160,9 +200,11 @@ impl App {
             mode: Mode::Grid,
             panel: true,
             thumb_pt: 168.0,
+            fill: false,
             compare: Compare::After,
             split: 0.5,
             split_swap: false,
+            clipping: false,
             copy_image: None,
             clipboard: None,
             edit_open: false,
@@ -182,9 +224,30 @@ impl App {
             frame_times: VecDeque::new(),
             last_fit: 1.0,
             exportable: (u64::MAX, 0),
+            #[cfg(target_os = "macos")]
+            film_mark: symbols::symbol("film", 28).map(|image| cc.egui_ctx.load_texture("film", image, egui::TextureOptions::LINEAR)),
+            #[cfg(not(target_os = "macos"))]
+            film_mark: None,
+            #[cfg(target_os = "macos")]
+            rail_icons: ["slider.horizontal.3", "crop.rotate", "pip"].map(|name| symbols::symbol(name, 40).map(|image| cc.egui_ctx.load_texture(name, image, egui::TextureOptions::LINEAR))),
+            #[cfg(not(target_os = "macos"))]
+            rail_icons: [None, None, None],
+            presets: presets::load(),
+            reference: reference::Reference::new(),
+            cropping: None,
+            new_preset: None,
+            preview_wanted: None,
+            #[cfg(target_os = "macos")]
+            menu: Some(menu::MenuBar::new(&cc.egui_ctx)),
+            recent: Vec::new(),
+            remember,
+            saved: ((0, Mode::Grid, 0, 0, 0, [false; 3]), std::time::Instant::now()),
             dialog: None,
             waker: Waker::from(Arc::new(Repaint(cc.egui_ctx.clone()))),
         };
+        if app.remember {
+            app.restore_session();
+        }
         if app.shots.is_none() && !paths.is_empty() {
             app.import(paths);
         }
@@ -194,6 +257,7 @@ impl App {
     // ---------- import ---------------------------------------------------------------------
 
     fn import(&mut self, paths: Vec<PathBuf>) {
+        self.remember_folders(&paths);
         if !paths.is_empty() {
             self.opening += 1;
             self.workers.send(Job::Collect(paths));
@@ -250,6 +314,7 @@ impl App {
                     }
                 }
             }
+            Dialog::Reference => self.reference.add(paths),
             Dialog::LoadLook => {
                 for p in paths {
                     match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<Settings>(&t).map_err(|e| e.to_string())) {
@@ -261,11 +326,14 @@ impl App {
         }
     }
 
-    fn poll(&mut self) {
+    fn poll(&mut self, ctx: &egui::Context) {
         while let Ok(done) = self.workers.rx.try_recv() {
             match done {
                 Done::Collected(paths) => {
                     self.opening -= 1;
+                    if self.lib.starred_only() {
+                        self.lib.set_starred_only(false);
+                    }
                     let mut first = None;
                     for p in paths {
                         if let Some(id) = self.lib.add(p.clone()) {
@@ -297,6 +365,7 @@ impl App {
                         }
                     }
                 }
+                Done::Reference { path, result } => self.reference.arrived(ctx, path, result),
                 Done::Encoded { path, result } => {
                     if let Some(run) = &mut self.export_run {
                         run.encoding -= 1;
@@ -315,18 +384,15 @@ impl App {
         match result {
             Err(e) => self.lib.get_mut(id).unwrap().status = Status::Failed(e),
             Ok(o) => {
-                // an export of ours came back as its original: one entry per original
+                // an export of ours came back as its original: shown on the original or a copy of it
                 if o.path != it.path {
                     if let Some(other) = self.lib.find_path(&o.path) {
-                        if o.look.is_some() {
-                            self.lib.checkpoint(&[other]);
-                            self.lib.set_look(&[other], o.look);
-                        }
+                        let shown = o.look.map_or(other, |l| self.lib.give_look(other, l));
                         let was_focus = self.lib.focus == Some(id);
                         self.tiers.forget(id);
                         self.lib.take_out(&[id].into());
                         if was_focus {
-                            self.lib.click(other);
+                            self.lib.click(shown);
                         }
                         return;
                     }
@@ -375,10 +441,14 @@ impl App {
         self.lib.focus.and_then(|f| self.lib.get(f)).and_then(|it| it.look.as_ref())
     }
 
+    /// Give the selected photos `look`, each keeping its own crop.
     fn set_looks(&mut self, look: Settings) {
         let ids = self.lib.selection();
         self.lib.checkpoint(&ids);
-        self.lib.set_look(&ids, Some(look));
+        for id in ids {
+            let crop = self.lib.get(id).and_then(|it| it.look.as_ref()).and_then(|l| l.crop);
+            self.lib.set_look(&[id], Some(Settings { crop, ..look.clone() }));
+        }
     }
 
     fn copy_look(&mut self, ctx: &egui::Context) {
@@ -409,40 +479,12 @@ impl App {
         self.ask(Dialog::LoadLook, async move { paths(d.pick_file().await) });
     }
 
-    fn do_action(&mut self, ctx: &egui::Context, a: controls::Action) {
-        use controls::Action;
-        match a {
-            Action::Process(on) => {
-                let ids = self.lib.selection();
-                self.lib.checkpoint(&ids);
-                match on {
-                    Some(on) => self.lib.set_process(&ids, on),
-                    None => self.lib.toggle_process(&ids),
-                }
-            }
-            Action::CopyLook => self.copy_look(ctx),
-            Action::PasteLook => self.paste_look(None),
-            Action::Reset => {
-                let ids = self.lib.selection();
-                self.lib.checkpoint(&ids);
-                self.lib.reset_looks(&ids);
-            }
-            Action::SaveLook => self.save_look(),
-            Action::LoadLook => self.load_look(),
-            Action::CopyFlags => {
-                if let Some(l) = self.focus_look() {
-                    ctx.copy_text(l.cli_flags());
-                }
-            }
-        }
-    }
-
     // ---------- keys ---------------------------------------------------------------------
 
     fn keys(&mut self, ctx: &egui::Context) {
-        // a dialog takes the keys: Return there means Export, not the loupe, and
+        // a dialog takes the keys: Return there means Export, not Detail, and
         // Delete must not take photos out of the library behind it
-        if ctx.wants_keyboard_input() || self.export_form.is_some() || !self.export_errors.is_empty() {
+        if ctx.egui_wants_keyboard_input() || self.export_form.is_some() || !self.export_errors.is_empty() {
             return;
         }
         let cmd = Modifiers::COMMAND;
@@ -467,86 +509,62 @@ impl App {
             self.paste_look(Some(&t));
         }
         let k = |m: Modifiers, key: Key| ctx.input_mut(|i| i.consume_key(m, key));
-        if k(cmd_shift, Key::E) {
-            self.open_export();
-        }
-        if k(cmd_shift, Key::R) {
-            self.do_action(ctx, controls::Action::Reset);
-        }
-        if k(cmd_shift, Key::V) && self.clipboard.is_some() {
-            self.paste_look(None);
-        }
-        if k(cmd_shift, Key::Z) {
-            self.step_history(true);
-        }
-        if k(cmd, Key::Z) {
-            self.step_history(false);
-        }
-        #[cfg(target_os = "macos")]
-        if k(cmd_shift, Key::O) {
-            self.photos_dialog();
-        }
-        if k(cmd, Key::O) {
-            self.import_dialog();
-        }
-        if k(cmd, Key::A) {
-            self.lib.select_all();
-        }
-        if k(cmd, Key::D) {
-            self.lib.select_none();
-        }
-        if k(cmd, Key::Num0) {
-            self.zoom = None;
-        }
-        if k(cmd, Key::Num1) {
-            self.zoom_100();
-        }
-        let zoom_in = k(cmd, Key::Equals) || k(cmd, Key::Plus);
-        let zoom_out = k(cmd, Key::Minus);
-        if zoom_in || zoom_out {
-            let f = if zoom_in { 1.5 } else { 1.0 / 1.5 };
-            match self.mode {
-                Mode::Grid => self.thumb_pt = (self.thumb_pt * f).clamp(80.0, 480.0),
-                _ => self.zoom = Some(self.current_zoom() * f),
+        if self.cropping.is_some() {
+            if k(none, Key::Enter) {
+                self.finish_crop();
+            }
+            if k(none, Key::Escape) {
+                self.cropping = None;
             }
         }
-        if k(none, Key::G) {
-            self.mode = Mode::Grid;
-            self.scroll_to_focus = true;
-        }
-        if k(none, Key::N) {
-            self.mode = Mode::Survey;
-        }
-        if (k(none, Key::E) || k(none, Key::Enter)) && self.lib.focus.is_some() {
-            self.mode = Mode::Loupe;
-            self.zoom = None;
+        // shifted keys first: a key asked for without shift is also pressed with it
+        let mut keyed = vec![
+            (cmd_shift, Key::E, Command::Export),
+            (cmd_shift, Key::R, Command::ResetLook),
+            (cmd_shift, Key::V, Command::PasteLook),
+            (cmd_shift, Key::Z, Command::Redo),
+            (cmd, Key::Z, Command::Undo),
+            (cmd, Key::Quote, Command::VirtualCopy),
+            (cmd, Key::A, Command::SelectAll),
+            (cmd, Key::D, Command::SelectNone),
+            (cmd, Key::Num0, Command::Fit),
+            (cmd, Key::Num1, Command::Actual),
+            (cmd, Key::Equals, Command::Zoom(true)),
+            (cmd, Key::Plus, Command::Zoom(true)),
+            (cmd, Key::Minus, Command::Zoom(false)),
+            (none, Key::G, Command::View(Mode::Grid)),
+            (none, Key::N, Command::View(Mode::Survey)),
+            (none, Key::E, Command::View(Mode::Detail)),
+            (none, Key::Enter, Command::View(Mode::Detail)),
+            (none, Key::Tab, Command::Panel),
+            (shift, Key::R, Command::Reference),
+            (none, Key::Backslash, Command::Compare(Compare::Before)),
+            (none, Key::Y, Command::Compare(Compare::Split)),
+            (none, Key::J, Command::Clipping),
+            (none, Key::R, Command::Crop),
+            (none, Key::S, Command::Star),
+            (none, Key::V, Command::Process(None)),
+            (none, Key::Delete, Command::Remove),
+            (none, Key::Backspace, Command::Remove),
+        ];
+        #[cfg(target_os = "macos")]
+        keyed.extend([(cmd_shift, Key::O, Command::OpenPhotos), (cmd, Key::R, Command::ShowInFinder)]);
+        keyed.push((cmd, Key::O, Command::Open));
+        for (m, key, c) in keyed {
+            if k(m, key) {
+                self.run(ctx, c);
+            }
         }
         if k(none, Key::Escape) && self.mode != Mode::Grid {
             self.mode = Mode::Grid;
             self.scroll_to_focus = true;
         }
-        if k(none, Key::Tab) {
-            self.panel = !self.panel;
-        }
-        if k(none, Key::Backslash) {
-            self.toggle_compare(Compare::Before);
-        }
-        if k(none, Key::Y) {
-            self.toggle_compare(Compare::Split);
-        }
-        if k(none, Key::V) && !self.lib.selected().is_empty() {
-            self.do_action(ctx, controls::Action::Process(None));
-        }
-        if k(none, Key::Z) && self.mode == Mode::Loupe {
+        if k(none, Key::Z) && self.mode == Mode::Detail {
             if self.zoom.is_some() {
                 self.zoom = None;
             } else {
                 self.zoom_100();
             }
-        }
-        if k(none, Key::Delete) || k(none, Key::Backspace) {
-            let ids = self.lib.selected().clone();
-            self.forget(&ids);
         }
         let mut moved = false;
         for (key, dx, dy) in [(Key::ArrowLeft, -1, 0), (Key::ArrowRight, 1, 0), (Key::ArrowUp, 0, -1), (Key::ArrowDown, 0, 1)] {
@@ -562,7 +580,7 @@ impl App {
         }
         if moved {
             self.scroll_to_focus = true;
-            if self.mode == Mode::Loupe {
+            if self.mode == Mode::Detail {
                 self.zoom = None;
             }
         }
@@ -631,12 +649,8 @@ impl App {
             }
             Ok(Some((w, h, rgba))) => {
                 run.queue.pop_front();
-                let mut pic = export::Picture { w, h, rgba };
-                let mut original_long = item.original.0.max(item.original.1);
-                if let Some(a) = item.crop() {
-                    pic = pic.crop(&a);
-                    original_long = export::cropped_long((pic.w, pic.h), (w, h), original_long);
-                }
+                let pic = export::Picture { w, h, rgba };
+                let original_long = export::cropped_long((w, h), self.tiers.grid_size(item), item.original.0.max(item.original.1));
                 let lib = &self.lib;
                 let claimed = &run.claimed;
                 let path = export::output_path(&run.form.dir, &item.path, run.form.format, &|p| claimed.contains(p) || lib.find_path(p).is_some());
@@ -661,7 +675,7 @@ impl App {
         }
     }
 
-    // ---------- loupe zoom ----------------------------------------------------------------
+    // ---------- detail zoom ---------------------------------------------------------------
 
     fn current_zoom(&self) -> f32 {
         self.zoom.unwrap_or(self.last_fit)
@@ -692,12 +706,8 @@ impl App {
         };
         match self.tiers.export_pixels(item, planner) {
             Ok(Some((w, h, rgba))) => {
-                let mut pic = export::Picture { w, h, rgba };
-                if let Some(a) = item.crop() {
-                    pic = pic.crop(&a);
-                }
-                let bytes: Vec<u8> = pic.rgba.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8).collect();
-                ctx.copy_image(egui::ColorImage::from_rgba_unmultiplied([pic.w as usize, pic.h as usize], &bytes));
+                let bytes: Vec<u8> = rgba.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8).collect();
+                ctx.copy_image(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &bytes));
                 self.copy_image = None;
             }
             Ok(None) => self.copy_image = None,
@@ -720,25 +730,68 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn on_exit(&mut self) {
+        if self.remember {
+            let _ = self.save_session(true);
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = &ui.ctx().clone();
         let t0 = std::time::Instant::now();
-        self.poll();
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        self.poll(ctx);
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         if !dropped.is_empty() {
             self.import(dropped);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let opened = finder::arrived();
+            if !opened.is_empty() {
+                self.import(opened);
+            }
         }
         if let Some(mut s) = self.shots.take() {
             s.step(self, ctx);
             self.shots = Some(s);
         }
+        #[cfg(target_os = "macos")]
+        let menu = self.menu.take();
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &menu {
+            // a dialog keeps the menu's commands from the library behind it, and text being
+            // typed keeps its own undo and select all
+            let typing = ctx.egui_wants_keyboard_input();
+            for c in menu.chosen() {
+                let held = typing && matches!(c, Command::Undo | Command::Redo | Command::SelectAll | Command::SelectNone);
+                if self.export_form.is_none() && self.export_errors.is_empty() && !held {
+                    self.run(ctx, c);
+                }
+            }
+        }
         self.keys(ctx);
-        let actions = self.layout(ctx);
-        for a in actions {
-            self.do_action(ctx, a);
+        let actions = self.layout(ui);
+        self.tiers.set_preview(self.preview_wanted.take());
+        if self.cropping.as_ref().is_some_and(|e| self.lib.focus != Some(e.id) || self.mode != Mode::Detail) {
+            self.finish_crop();
+            if self.mode == Mode::Detail && self.can(&Command::Crop) {
+                self.start_crop();
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(mut menu) = menu {
+            menu.sync(self);
+            self.menu = Some(menu);
+        }
+        for c in actions {
+            self.run(ctx, c);
         }
         self.poll_dialog();
         self.export_step();
         self.copy_image_step(ctx);
+        if let Some(wait) = self.remember.then(|| self.save_session(false)).flatten() {
+            ctx.request_repaint_after(wait);
+        }
         let (loads, pending) = self.tiers.process(&self.lib, self.before());
         self.pending = pending;
         // while a knob is held the grid size may be passing through many values

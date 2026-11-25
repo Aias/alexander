@@ -381,7 +381,8 @@ fn fs_mip(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 // v1 = (view: 0 print, 1 scan, 2 page; encoded solid ink; scan black; scan white)
 // v2 = (paper colour r, g, b; dither strength)
 // v3 = (first canvas column showing the photo itself, 1 to write display values
-//       unconverted, the column after the last showing it)
+//       unconverted, the column after the last showing it, 1 to mark clipped values)
+// v4 = (cosine and sine of the angle the picture turns clockwise under the canvas)
 // t0 the finished picture with its pyramid, t1 the photo
 
 fn texel(p: vec2<i32>, lvl: i32, src: bool) -> vec3<f32> {
@@ -393,9 +394,16 @@ fn texel(p: vec2<i32>, lvl: i32, src: bool) -> vec3<f32> {
     return vec3<f32>(textureLoad(t0, clamp(p, vec2<i32>(0), size - 1), lvl).r);
 }
 
+// the picture point under canvas position `pos`, the picture turned about its centre
+fn picture_point(pos: vec2<f32>) -> vec2<f32> {
+    let m = 0.5 * vec2<f32>(textureDimensions(t1));
+    let d = u.v[0].xy + pos * u.v[0].z - m;
+    return m + vec2<f32>(u.v[4].x * d.x + u.v[4].y * d.y, u.v[4].x * d.y - u.v[4].y * d.x);
+}
+
 fn sample_picture(pos: vec2<f32>, src: bool) -> vec3<f32> {
     let s = u.v[0].z;
-    let c = u.v[0].xy + pos * s;
+    let c = picture_point(pos);
     if (s <= 0.5) {
         return texel(vec2<i32>(floor(c)), 0, src);          // enlarged twice or more: show the pixels
     }
@@ -410,8 +418,9 @@ fn sample_picture(pos: vec2<f32>, src: bool) -> vec3<f32> {
         }
         return max(acc, vec3<f32>(0.0));
     }
-    // reduced: average the picture pixels each screen pixel covers, in linear light
-    let lvl = i32(u.v[0].w);
+    // reduced: average the picture pixels each screen pixel covers, in linear light; the
+    // photo itself has no half-size copies
+    let lvl = select(i32(u.v[0].w), 0, src);
     let f = exp2(f32(lvl));
     let lo = (c - 0.5 * s) / f;
     let hi = (c + 0.5 * s) / f;
@@ -432,6 +441,10 @@ fn sample_picture(pos: vec2<f32>, src: bool) -> vec3<f32> {
 
 @fragment
 fn fs_canvas(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let p = picture_point(pos.xy);
+    if (any(p < vec2<f32>(0.0)) || any(p >= vec2<f32>(textureDimensions(t1)))) {
+        return vec4<f32>(0.0);
+    }
     let src = pos.x >= u.v[3].x && pos.x < u.v[3].z;
     let r = sample_picture(pos.xy, src);
     var enc: vec3<f32>;
@@ -445,6 +458,13 @@ fn fs_canvas(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         enc = vec3<f32>(clamp(u.v[1].z + (lin_to_srgb(r.r) - ek) / (u.v[1].w - ek) * (1.0 - u.v[1].z), 0.0, 1.0));
     } else {
         enc = vec3<f32>(lin_to_srgb(clamp(r.r, 0.0, 1.0)));
+    }
+    if (u.v[3].w > 0.5) {
+        if (min(enc.r, min(enc.g, enc.b)) >= 0.998) {
+            enc = vec3<f32>(1.0, 0.25, 0.2);
+        } else if (max(enc.r, max(enc.g, enc.b)) <= 0.002) {
+            enc = vec3<f32>(0.2, 0.45, 1.0);
+        }
     }
     if (u.v[3].y > 0.5) {
         return vec4<f32>(enc, 1.0);

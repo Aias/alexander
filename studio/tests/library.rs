@@ -1,6 +1,6 @@
 //! Library bookkeeping, selection, looks, and the round trip from an export back to its original.
 use alexander_studio::export::{self, Format, Picture, Size};
-use alexander_studio::library::{sync_changed, Library};
+use alexander_studio::library::{sync_changed, Library, Status};
 use alexander_studio::load;
 use alexander_studio::params::Settings;
 use alexander_studio::provenance::{self, Record};
@@ -113,6 +113,7 @@ fn every_knob_is_carried() {
                 "dev" => serde_json::json!({"Minutes": 9.0}),
                 "page_mm" => serde_json::json!(120.0),
                 "view" => serde_json::json!("Page"),
+                "crop" => serde_json::json!({"left": 0.1, "top": 0.05, "right": 0.9, "bottom": 0.95, "angle": 2.0}),
                 other => panic!("no test value for {other}"),
             },
             serde_json::Value::String(_) => match k.as_str() {
@@ -177,6 +178,48 @@ fn removal_is_undone_in_place() {
     assert!(l.find_path(&PathBuf::from("/p/2.jpg")).is_some());
     l.redo();
     assert_eq!(l.len(), 2);
+}
+
+#[test]
+fn the_starred_filter_shows_and_walks_only_starred_photos() {
+    let (mut l, id) = lib(4);
+    l.toggle_starred(&[id[1], id[3]]);
+    l.click(id[0]);
+    l.set_starred_only(true);
+    assert_eq!(l.shown(), &[id[1], id[3]]);
+    assert!(l.selected().is_empty());
+    l.step(1, false);
+    assert_eq!(sel(&l), vec![id[1]]);
+    l.step(1, false);
+    assert_eq!(sel(&l), vec![id[3]]);
+    l.select_all();
+    assert_eq!(sel(&l), vec![id[1], id[3]]);
+    l.toggle_starred(&[id[3]]);
+    assert_eq!(l.shown(), &[id[1]]);
+    assert_eq!(sel(&l), vec![id[1]]);
+}
+
+#[test]
+fn virtual_copies_follow_their_photo_and_hold_looks_of_their_own() {
+    let (mut l, id) = lib(3);
+    for &i in &id {
+        l.get_mut(i).unwrap().status = Status::Ready;
+    }
+    let graded = Settings { grade: 1.5, ..Settings::default() };
+    l.set_look(&[id[0]], Some(graded.clone()));
+    let c = l.duplicate(&[id[0]]);
+    assert_eq!(l.items().iter().map(|it| it.id).collect::<Vec<_>>(), vec![id[0], c[0], id[1], id[2]]);
+    assert_eq!(l.get(c[0]).unwrap().title(), "0.jpg · Copy 1");
+    assert_eq!(l.get(c[0]).unwrap().look, Some(graded.clone()));
+    l.click(id[1]);
+    l.toggle(c[0]);
+    assert_eq!(l.selection(), vec![c[0], id[1]]);
+    assert_eq!(l.give_look(id[0], graded), id[0]);
+    let other = l.give_look(id[0], Settings::default());
+    assert_eq!(l.get(other).unwrap().copy, 2);
+    assert_eq!(l.give_look(id[0], Settings::default()), other);
+    l.remove(&BTreeSet::from([id[0]]));
+    assert_eq!(l.find_path(&PathBuf::from("/p/0.jpg")), Some(c[0]));
 }
 
 #[test]

@@ -1,14 +1,14 @@
 //! The window's chrome: the toolbar, the status bar under the view, and the dialogs.
 
 use super::views::{segmented, LABEL};
-use super::{controls, paths, App, Compare, Dialog, Mode, SizeChoice};
+use super::{controls, paths, App, Command, Compare, Dialog, Mode, SizeChoice};
 use alexander_studio::export::Format;
 use egui::{vec2, Align, Align2, Button, FontId, Key, Layout, Margin, Rect, RichText, Ui};
 
 const DIALOG_BUTTON: egui::Vec2 = vec2(84.0, 26.0);
 
 fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
-    egui::Frame::window(&ctx.style()).inner_margin(Margin::same(18))
+    egui::Frame::window(&ctx.global_style()).inner_margin(Margin::same(18))
 }
 
 /// Buttons along the right edge of a dialog, first given rightmost.
@@ -18,9 +18,9 @@ fn dialog_buttons(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 }
 
 impl App {
-    pub(super) fn toolbar(&mut self, ctx: &egui::Context) {
-        let frame = egui::Frame::side_top_panel(&ctx.style()).inner_margin(Margin::symmetric(10, 0));
-        egui::TopBottomPanel::top("toolbar").exact_height(40.0).frame(frame).show(ctx, |ui| {
+    pub(super) fn toolbar(&mut self, ui: &mut Ui) {
+        let frame = egui::Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(10, 0));
+        egui::Panel::top("toolbar").exact_size(40.0).frame(frame).show(ui, |ui| {
             let bar = ui.max_rect();
             ui.horizontal_centered(|ui| {
                 if ui.button("Open…").on_hover_text("⌘O").clicked() {
@@ -46,7 +46,7 @@ impl App {
             });
             if !self.lib.is_empty() {
                 let before = self.mode;
-                let views = [(Mode::Grid, "Grid", "G"), (Mode::Survey, "Survey", "N"), (Mode::Loupe, "Loupe", "E")];
+                let views = [(Mode::Grid, "Grid", "G"), (Mode::Survey, "Survey", "N"), (Mode::Detail, "Detail", "E")];
                 ui.put(Rect::from_center_size(bar.center(), vec2(228.0, 26.0)), |ui: &mut Ui| segmented(ui, &mut self.mode, &views));
                 if self.mode != before {
                     self.scroll_to_focus = true;
@@ -60,49 +60,65 @@ impl App {
     pub(super) fn status_bar(&mut self, ui: &mut Ui) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             match self.mode {
-                Mode::Grid => {
-                    let mut size = self.thumb_pt as f64;
-                    controls::slider(ui, &mut size, 80.0..=480.0, 110.0).on_hover_text("⌘+ / ⌘−");
-                    self.thumb_pt = size as f32;
+                Mode::Grid | Mode::Survey => {
+                    if self.mode == Mode::Grid {
+                        let mut size = self.thumb_pt as f64;
+                        controls::slider(ui, &mut size, 80.0..=480.0, 110.0).on_hover_text("⌘+ / ⌘−");
+                        self.thumb_pt = size as f32;
+                        ui.add_space(8.0);
+                    }
+                    self.switch(ui, self.fill, "Fill", "", Command::Fill(true));
+                    self.switch(ui, !self.fill, "Fit", "", Command::Fill(false));
                 }
-                Mode::Loupe => {
+                Mode::Detail if self.cropping.is_none() => {
                     if self.zoom != Some(1.0) {
                         ui.label(RichText::new(format!("{:.0}%", self.current_zoom() * 100.0)).color(LABEL));
                     }
-                    if ui.selectable_label(self.zoom == Some(1.0), "100%").on_hover_text("⌘1").clicked() {
-                        self.zoom_100();
-                    }
-                    if ui.selectable_label(self.zoom.is_none(), "Fit").on_hover_text("⌘0").clicked() {
-                        self.zoom = None;
-                    }
+                    self.switch(ui, self.zoom == Some(1.0), "100%", "⌘1", Command::Actual);
+                    self.switch(ui, self.zoom.is_none(), "Fit", "⌘0", Command::Fit);
+                    ui.add_space(8.0);
+                    let starred = self.lib.focus.and_then(|f| self.lib.get(f)).is_some_and(|it| it.starred);
+                    self.switch(ui, starred, if starred { "★" } else { "☆" }, "S", Command::Star);
                 }
-                Mode::Survey => {}
+                _ => {}
             }
             ui.add_space(8.0);
-            if self.compare == Compare::Split && ui.selectable_label(self.split_swap, "Swap").clicked() {
-                self.split_swap = !self.split_swap;
+            if self.compare == Compare::Split {
+                self.switch(ui, self.split_swap, "Swap", "", Command::Swap);
             }
             for (c, label, keys) in [(Compare::Split, "Split", "Y"), (Compare::Before, "Before", "\\")] {
-                if ui.selectable_label(self.compare == c, label).on_hover_text(keys).clicked() {
-                    self.toggle_compare(c);
-                }
+                self.switch(ui, self.compare == c, label, keys, Command::Compare(c));
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                if self.opening > 0 {
+                let starred_only = self.lib.starred_only();
+                self.switch(ui, starred_only, "Starred Only", "", Command::StarredOnly);
+                if self.opening > 0 || self.copy_image.is_some() {
                     ui.add(egui::Spinner::new().size(12.0).color(LABEL));
                 }
                 let n = self.lib.len();
                 let mut info = format!("{n} {}", if n == 1 { "photo" } else { "photos" });
+                if starred_only {
+                    info = format!("{} of {info}", self.lib.shown().len());
+                }
                 let k = self.lib.selected().len();
                 if k > 0 {
                     info += &format!(" / {k} selected");
                 }
                 if let Some(it) = self.lib.focus.and_then(|f| self.lib.get(f)) {
-                    info += &format!(" / {}", it.name);
+                    info += &format!(" / {}", it.title());
                 }
                 ui.add(egui::Label::new(RichText::new(info).color(LABEL)).truncate());
             });
         });
+    }
+
+    /// A switch in a bar, lit when `on`, that runs `c` when clicked.
+    fn switch(&mut self, ui: &mut Ui, on: bool, label: &str, tip: &str, c: Command) {
+        let r = ui.selectable_label(on, label);
+        let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
+        if r.clicked() {
+            self.run(&ui.ctx().clone(), c);
+        }
     }
 
     pub(super) fn empty(&mut self, ui: &mut Ui) {
@@ -127,7 +143,7 @@ impl App {
         let n = self.exportable();
         let ready = n > 0 && form.dir_ok;
         let (mut go, mut cancel, mut choose) = (false, false, None);
-        let modal = egui::Modal::new(egui::Id::new("export")).frame(dialog_frame(ctx)).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("export")).frame(dialog_frame(ctx)).show(ctx, |ui| {
             ui.set_width(340.0);
             ui.heading(if n == 1 { "Export 1 Photo".to_string() } else { format!("Export {n} Photos") });
             ui.add_space(12.0);
@@ -191,7 +207,7 @@ impl App {
             return;
         }
         let mut close = false;
-        let modal = egui::Modal::new(egui::Id::new("errors")).frame(dialog_frame(ctx)).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("errors")).frame(dialog_frame(ctx)).show(ctx, |ui| {
             ui.set_max_width(480.0);
             for e in self.export_errors.iter().take(12) {
                 ui.label(e);

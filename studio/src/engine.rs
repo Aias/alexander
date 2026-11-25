@@ -64,12 +64,16 @@ struct Cache {
 /// Where a canvas looks: `origin` is the picture position of its top-left corner and
 /// `scale` the number of picture pixels per canvas pixel. The canvas columns from
 /// `source[0]` up to `source[1]`, in canvas pixels, show the photo itself instead of its
-/// render.
+/// render. With `clip`, display values at pure white show red and at pure black blue. The
+/// picture turns `angle` radians clockwise about its centre under the canvas; canvas pixels
+/// it does not reach are transparent.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Canvas {
     pub origin: [f32; 2],
     pub scale: f32,
     pub source: [f32; 2],
+    pub clip: bool,
+    pub angle: f32,
 }
 
 impl Canvas {
@@ -577,7 +581,7 @@ impl Engine {
         Some(first)
     }
 
-    fn canvas_numbers(view: &ViewPlan, c: &Canvas, level: u32, raw: bool) -> [[f32; 4]; 4] {
+    fn canvas_numbers(view: &ViewPlan, c: &Canvas, level: u32, raw: bool) -> [[f32; 4]; 5] {
         let mode = match view.mode {
             View::Print | View::White => 0.0,
             View::Scan => 1.0,
@@ -588,7 +592,8 @@ impl Engine {
             [c.origin[0], c.origin[1], c.scale, level as f32],
             [mode, tone::lin_to_srgb(view.solid as f64) as f32, view.scan_black, view.scan_white],
             [cream[0], cream[1], cream[2], if raw { 0.0 } else { 1.0 }],
-            [c.source[0], if raw { 1.0 } else { 0.0 }, c.source[1], 0.0],
+            [c.source[0], if raw { 1.0 } else { 0.0 }, c.source[1], if c.clip { 1.0 } else { 0.0 }],
+            [c.angle.cos(), c.angle.sin(), 0.0, 0.0],
         ]
     }
 
@@ -624,11 +629,16 @@ impl Engine {
     /// picture pixels to a pixel across.
     pub fn read_display(&mut self, photo: &mut Photo, view: &ViewPlan, step: u32) -> (u32, u32, Vec<f32>) {
         let (w, h) = (photo.size().0.div_ceil(step), photo.size().1.div_ceil(step));
+        (w, h, self.read_canvas(photo, view, &Canvas { origin: [0.0, 0.0], scale: step as f32, source: Canvas::RENDER, clip: false, angle: 0.0 }, w, h))
+    }
+
+    /// Display values of a canvas of `w` × `h` pixels looking as `canvas` says, four floats a pixel.
+    pub fn read_canvas(&mut self, photo: &mut Photo, view: &ViewPlan, canvas: &Canvas, w: u32, h: u32) -> Vec<f32> {
         let target = self.take(w, h, Format::Rgba32Float);
-        self.draw(photo, view, &Canvas { origin: [0.0, 0.0], scale: step as f32, source: Canvas::RENDER }, &target.view, Format::Rgba32Float, true);
+        self.draw(photo, view, canvas, &target.view, Format::Rgba32Float, true);
         let bytes = self.gpu.read(&target, 16);
         self.give(target);
-        (w, h, bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
+        bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect()
     }
 }
 

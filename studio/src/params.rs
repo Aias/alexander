@@ -30,6 +30,18 @@ pub enum Frame {
     Off,
 }
 
+/// The part of the photo kept. The photo turns `angle` degrees clockwise about its centre
+/// under a level frame, which keeps the fractions of its width from `left` to `right` and of
+/// its height from `top` to `bottom`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Crop {
+    pub left: f64,
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub angle: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -38,6 +50,7 @@ pub struct Settings {
     // negative
     pub film: FilmKind,
     pub frame: Frame,
+    pub crop: Option<Crop>,
     pub film_mm: f64,
     pub filter: Filter,
     pub lens_um: f64,
@@ -89,6 +102,7 @@ impl Default for Settings {
             seed: 1,
             film: FilmKind::Trix1956,
             frame: Frame::Keep,
+            crop: None,
             film_mm: 24.0,
             filter: Filter::None,
             lens_um: 10.0,

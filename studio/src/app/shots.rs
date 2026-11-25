@@ -6,6 +6,8 @@ use super::{App, Compare, ExportForm, Mode, SizeChoice};
 use alexander_studio::export::Format;
 use alexander_studio::params::Settings;
 use std::path::PathBuf;
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
 
 pub struct Shots {
     dir: PathBuf,
@@ -13,7 +15,7 @@ pub struct Shots {
     step: usize,
     frames: u32,
     idle: u32,
-    waiting_shot: Option<String>,
+    waiting_shot: Option<(String, Receiver<Arc<egui::ColorImage>>)>,
 }
 
 impl Shots {
@@ -24,31 +26,29 @@ impl Shots {
     }
 
     fn shot(&mut self, ctx: &egui::Context, name: &str) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
-        self.waiting_shot = Some(name.to_string());
+        let (tx, rx) = channel();
+        ctx.request_screenshot(move |image| {
+            let _ = tx.send(image);
+        });
+        self.waiting_shot = Some((name.to_string(), rx));
     }
 
     pub fn step(&mut self, app: &mut App, ctx: &egui::Context) {
         self.frames += 1;
-        if let Some(name) = self.waiting_shot.clone() {
-            let img = ctx.input(|i| {
-                i.events.iter().find_map(|e| match e {
-                    egui::Event::Screenshot { image, .. } => Some(image.clone()),
-                    _ => None,
-                })
-            });
-            if let Some(img) = img {
-                let [w, h] = img.size;
-                let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
-                let path = self.dir.join(format!("{name}.png"));
-                if let Some(buf) = image::RgbaImage::from_raw(w as u32, h as u32, bytes) {
-                    let _ = buf.save(&path);
-                    eprintln!("shot {}", path.display());
-                }
-                self.waiting_shot = None;
-                self.step += 1;
-                self.idle = 0;
+        if let Some((name, receiver)) = self.waiting_shot.take() {
+            let Ok(img) = receiver.try_recv() else {
+                self.waiting_shot = Some((name, receiver));
+                return;
+            };
+            let [w, h] = img.size;
+            let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
+            let path = self.dir.join(format!("{name}.png"));
+            if let Some(buf) = image::RgbaImage::from_raw(w as u32, h as u32, bytes) {
+                let _ = buf.save(&path);
+                eprintln!("shot {}", path.display());
             }
+            self.step += 1;
+            self.idle = 0;
             return;
         }
         // a few quiet frames in a row: everything asked for has been drawn
@@ -65,13 +65,15 @@ impl Shots {
                 self.step += 1;
             }
             2 if settled && !app.lib.is_empty() => {
-                // a few photos selected, three of them given the process
+                // a few photos selected, three of them given the process, and a virtual copy
+                app.lib.duplicate(&[app.lib.items()[1].id]);
                 let ids: Vec<u64> = app.lib.items().iter().map(|it| it.id).collect();
                 app.lib.click(ids[0]);
                 for &id in ids.iter().take(4).skip(1) {
                     app.lib.toggle(id);
                 }
                 app.lib.focus = Some(ids[0]);
+                app.lib.toggle_starred(&[ids[0], ids[2]]);
                 let processed: Vec<u64> = ids.iter().take(3).copied().collect();
                 app.lib.set_look(&processed, Some(Settings::default()));
                 app.mode = Mode::Grid;
@@ -84,18 +86,18 @@ impl Shots {
             }
             5 if settled => self.shot(ctx, "3-selected"),
             6 => {
-                app.mode = Mode::Loupe;
+                app.mode = Mode::Detail;
                 app.panel = true;
                 app.zoom = None;
                 self.step += 1;
             }
-            7 if settled => self.shot(ctx, "4-loupe"),
+            7 if settled => self.shot(ctx, "4-detail"),
             8 => {
                 app.zoom = Some(1.0);
                 app.center = [0.45, 0.5];
                 self.step += 1;
             }
-            9 if settled => self.shot(ctx, "5-loupe-100"),
+            9 if settled => self.shot(ctx, "5-detail-100"),
             10 => {
                 // a late-stage knob: only the print and what follows should be redone
                 let id = app.lib.focus.unwrap();
@@ -121,18 +123,42 @@ impl Shots {
             15 if settled => self.shot(ctx, "8-split-survey"),
             16 => {
                 app.compare = Compare::After;
+                app.fill = true;
+                self.step += 1;
+            }
+            17 if settled => self.shot(ctx, "9-survey-fill"),
+            18 => {
+                app.mode = Mode::Grid;
+                self.step += 1;
+            }
+            19 if settled => self.shot(ctx, "10-grid-fill"),
+            20 => {
+                // the focused photo cropped at an angle, with the reference beside it
+                app.fill = false;
+                app.lib.click(app.lib.focus.unwrap());
+                app.start_crop();
+                if let Some(e) = &mut app.cropping {
+                    e.turn(8.0, app.tiers.grid_size(app.lib.get(e.id).unwrap()));
+                }
+                app.reference.shown = true;
+                self.step += 1;
+            }
+            21 if settled && self.idle >= 90 => self.shot(ctx, "11-crop-reference"),
+            22 => {
+                app.cropping = None;
+                app.reference.shown = false;
                 app.open_export();
                 self.step += 1;
             }
-            17 if settled && self.idle >= 12 => self.shot(ctx, "9-export"),
-            18 => {
+            23 if settled && self.idle >= 12 => self.shot(ctx, "12-export"),
+            24 => {
                 app.export_form = None;
                 let dir = self.dir.join("export");
                 let _ = std::fs::create_dir_all(&dir);
                 app.start_export(ExportForm { dir, dir_ok: true, format: Format::Png8, size: SizeChoice::Original, long: 0 });
                 self.step += 1;
             }
-            19 if settled => {
+            25 if settled => {
                 eprintln!("export finished; errors: {:?}", app.export_errors);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 self.step += 1;

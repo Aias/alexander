@@ -1,26 +1,15 @@
 //! The controls panel: the histogram, the process switch, the knobs in sections and the
 //! look commands. It edits one `Settings`; the change is carried over to every selected photo.
 
-use super::views::{segmented, LABEL, TEXT, VIEW_BG};
-use super::App;
+use super::views::{label_family, segmented, title_font, LABEL, TEXT, VIEW_BG};
+use super::{App, Command};
 use alexander_studio::film::{Dev, FilmKind, Filter};
 use alexander_studio::params::{Frame, Repro, Settings, View};
 use egui::collapsing_header::CollapsingState;
-use egui::{pos2, vec2, Align, Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragValue, EventFilter, FontId, Key, Layout, Rect, RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, WidgetText};
+use egui::{pos2, vec2, Align, Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragValue, EventFilter, Key, Layout, Rect, RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, WidgetText};
 use std::ops::RangeInclusive;
 
-pub enum Action {
-    /// None switches it over; otherwise on or off.
-    Process(Option<bool>),
-    CopyLook,
-    PasteLook,
-    Reset,
-    SaveLook,
-    LoadLook,
-    CopyFlags,
-}
-
-const LABEL_W: f32 = 104.0;
+const LABEL_W: f32 = 116.0;
 const VALUE_W: f32 = 44.0;
 const HANDLE_R: f32 = 5.0;
 const RAIL: Color32 = Color32::from_gray(66);
@@ -29,10 +18,15 @@ const RULE: Color32 = Color32::from_gray(44);
 const HISTOGRAM: Color32 = Color32::from_gray(150);
 
 impl App {
-    pub(super) fn panel_ui(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
+    pub(super) fn panel_ui(&mut self, ui: &mut Ui, actions: &mut Vec<Command>) {
         let focus = self.lib.focus.filter(|_| !self.lib.selected().is_empty()).and_then(|f| self.lib.get(f));
         let before = self.before();
-        histogram(ui, focus.and_then(|it| self.tiers.histogram(it, before)));
+        histogram(ui, focus.and_then(|it| self.tiers.histogram(it, before)), &mut self.clipping);
+        if self.cropping.is_some() {
+            ui.add_space(10.0);
+            self.crop_ui(ui);
+            return;
+        }
         let processed = focus.is_some_and(|it| it.look.is_some());
         let mut s = focus.and_then(|it| it.look.clone().or_else(|| it.stash.clone())).unwrap_or_default();
         let enabled = focus.is_some();
@@ -40,12 +34,15 @@ impl App {
         ui.add_space(10.0);
         ui.add_enabled_ui(enabled, |ui| header(ui, processed, actions));
         ui.add_space(6.0);
-        egui::TopBottomPanel::bottom("look").frame(egui::Frame::NONE.inner_margin(egui::Margin { top: 8, ..Default::default() })).show_inside(ui, |ui| {
+        egui::Panel::bottom("look").frame(egui::Frame::NONE.inner_margin(egui::Margin { top: 8, ..Default::default() })).show(ui, |ui| {
             ui.add_enabled_ui(enabled, |ui| footer(ui, processed, can_paste, actions));
         });
         let before = s.clone();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.add_enabled_ui(enabled, |ui| knobs(ui, &mut s));
+            ui.add_enabled_ui(enabled, |ui| {
+                self.presets_ui(ui);
+                knobs(ui, &mut s);
+            });
         });
         if enabled && s != before {
             let ids = self.lib.selection();
@@ -59,8 +56,9 @@ impl App {
 }
 
 /// Counts of the display values from black to white, scaled so that the busiest tone short
-/// of the clipped ends fills the box.
-fn histogram(ui: &mut Ui, bins: Option<&[f32]>) {
+/// of the clipped ends fills the box. A triangle in each top corner lights when shadows or
+/// highlights clip, and a click on either switches the marking of clipped values.
+fn histogram(ui: &mut Ui, bins: Option<&[f32]>, clipping: &mut bool) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 88.0), Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, CornerRadius::same(4), VIEW_BG);
@@ -76,42 +74,59 @@ fn histogram(ui: &mut Ui, bins: Option<&[f32]>) {
         let x = rect.left() + i as f32 * w;
         p.rect_filled(Rect::from_min_max(pos2(x, inner.bottom() - h), pos2(x + w, inner.bottom())), CornerRadius::ZERO, HISTOGRAM);
     }
+    let total: f32 = bins.iter().sum();
+    for (corner, count, toward) in [(rect.left_top() + vec2(10.0, 10.0), bins[0], -1.0), (rect.right_top() + vec2(-10.0, 10.0), bins[bins.len() - 1], 1.0)] {
+        let r = ui.interact(Rect::from_center_size(corner, vec2(16.0, 16.0)), ui.scope_id().with(("clip", corner.x as i32)), Sense::click()).on_hover_text("J");
+        if r.clicked() {
+            *clipping = !*clipping;
+        }
+        let lit = count > total * 0.001;
+        let fill = if lit { Color32::WHITE } else { Color32::from_gray(80) };
+        let pts = [corner + vec2(-4.0 * toward, -4.0), corner + vec2(4.0 * toward, -4.0), corner + vec2(4.0 * toward, 4.0)];
+        ui.painter().add(Shape::convex_polygon(pts.to_vec(), fill, Stroke::NONE));
+        if *clipping {
+            ui.painter().rect_stroke(Rect::from_center_size(corner, vec2(14.0, 14.0)), CornerRadius::same(2), Stroke::new(1.0f32, Color32::from_gray(200)), egui::StrokeKind::Inside);
+        }
+    }
 }
 
 /// The process switch and the commands for looks as files.
-fn header(ui: &mut Ui, processed: bool, actions: &mut Vec<Action>) {
+fn header(ui: &mut Ui, processed: bool, actions: &mut Vec<Command>) {
     ui.horizontal(|ui| {
         let mut on = processed;
         ui.add_sized([ui.available_width() - 34.0, 26.0], |ui: &mut Ui| segmented(ui, &mut on, &[(false, "Original", "V"), (true, "Film", "V")]));
         if on != processed {
-            actions.push(Action::Process(Some(on)));
+            actions.push(Command::Process(Some(on)));
         }
-        ui.spacing_mut().interact_size.y = 26.0;
-        ui.menu_button("…", |ui| {
+        let (r, _) = egui::containers::menu::MenuButton::from_button(Button::new("").min_size(vec2(26.0, 26.0))).ui(ui, |ui| {
             ui.set_min_width(200.0);
-            let mut item = |ui: &mut Ui, text: &str, enabled: bool, a: Action| {
+            let mut item = |ui: &mut Ui, text: &str, enabled: bool, a: Command| {
                 if ui.add_enabled(enabled, Button::new(text)).clicked() {
                     actions.push(a);
-                    ui.close_menu();
+                    ui.close();
                 }
             };
-            item(ui, "Save Look…", processed, Action::SaveLook);
-            item(ui, "Load Look…", true, Action::LoadLook);
-            item(ui, "Copy as twb2.py Flags", processed, Action::CopyFlags);
+            item(ui, "Save Look…", processed, Command::SaveLook);
+            item(ui, "Load Look…", true, Command::LoadLook);
+            item(ui, "Copy as twb2.py Flags", processed, Command::CopyFlags);
         });
+        let colour = ui.style().interact(&r).fg_stroke.color;
+        for dx in [-5.0, 0.0, 5.0] {
+            ui.painter().circle_filled(r.rect.center() + vec2(dx, 0.0), 1.4, colour);
+        }
     });
 }
 
-fn footer(ui: &mut Ui, processed: bool, can_paste: bool, actions: &mut Vec<Action>) {
+fn footer(ui: &mut Ui, processed: bool, can_paste: bool, actions: &mut Vec<Command>) {
     ui.horizontal(|ui| {
-        let mut button = |ui: &mut Ui, text: &str, keys: &str, enabled: bool, a: Action| {
+        let mut button = |ui: &mut Ui, text: &str, keys: &str, enabled: bool, a: Command| {
             if ui.add_enabled(enabled, Button::new(text).min_size(vec2(64.0, 24.0))).on_hover_text(keys).clicked() {
                 actions.push(a);
             }
         };
-        button(ui, "Copy", "⇧⌘C", processed, Action::CopyLook);
-        button(ui, "Paste", "⇧⌘V", can_paste, Action::PasteLook);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| button(ui, "Reset", "⇧⌘R", processed, Action::Reset));
+        button(ui, "Copy", "⇧⌘C", processed, Command::CopyLook);
+        button(ui, "Paste", "⇧⌘V", can_paste, Command::PasteLook);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| button(ui, "Reset", "⇧⌘R", processed, Command::ResetLook));
     });
 }
 
@@ -164,7 +179,7 @@ fn name(ui: &mut Ui, label: &str, tip: &str, changed: bool) -> bool {
     if link {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
-    let text = RichText::new(label).color(if link { TEXT } else { LABEL });
+    let text = RichText::new(label).family(label_family()).color(if link { TEXT } else { LABEL });
     let galley = WidgetText::from(if link { text.underline() } else { text }).into_galley(ui, Some(TextWrapMode::Truncate), rect.width(), TextStyle::Body);
     ui.painter().galley(pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, LABEL);
     let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
@@ -173,7 +188,7 @@ fn name(ui: &mut Ui, label: &str, tip: &str, changed: bool) -> bool {
 
 /// A labelled slider and its value. Clicking the name or double-clicking the slider
 /// restores the default; the value can be dragged or typed, past the slider's ends too.
-fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize) {
+pub(super) fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize) {
     ui.horizontal(|ui| {
         let reset = name(ui, label, tip, *v != default);
         let speed = (range.end() - range.start()) / 300.0;
@@ -181,7 +196,7 @@ fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<
         let r = slider(ui, v, range, w);
         ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
         ui.spacing_mut().button_padding.x = 2.0;
-        ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).fixed_decimals(decimals));
+        ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).custom_formatter(|v, _| format!("{v:.decimals$}")));
         if reset || r.double_clicked() {
             *v = default;
         }
@@ -189,7 +204,7 @@ fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<
 }
 
 /// A named row of controls; true when the name was clicked to restore the default.
-fn row(ui: &mut Ui, label: &str, tip: &str, changed: bool, add: impl FnOnce(&mut Ui)) -> bool {
+pub(super) fn row(ui: &mut Ui, label: &str, tip: &str, changed: bool, add: impl FnOnce(&mut Ui)) -> bool {
     ui.horizontal(|ui| {
         let reset = name(ui, label, tip, changed);
         add(ui);
@@ -208,7 +223,7 @@ fn toggles<T: PartialEq + Copy>(ui: &mut Ui, label: &str, tip: &str, v: &mut T, 
     }
 }
 
-fn combo<T: PartialEq + Copy>(ui: &mut Ui, id: &str, v: &mut T, options: &[(T, &str)]) {
+pub(super) fn combo<T: PartialEq + Copy>(ui: &mut Ui, id: &str, v: &mut T, options: &[(T, &str)]) {
     let current = options.iter().find(|o| o.0 == *v).map_or("", |o| o.1);
     ComboBox::from_id_salt(id).width(ui.available_width()).selected_text(current).show_ui(ui, |ui| {
         for (o, name) in options {
@@ -225,17 +240,23 @@ fn check(ui: &mut Ui, label: &str, tip: &str, v: &mut bool, default: bool) {
     }
 }
 
+/// A heading over a rule across the panel, brighter under the pointer when it can be clicked.
+pub(super) fn title(ui: &mut Ui, name: &str, sense: Sense) -> (Rect, egui::Response) {
+    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), sense);
+    ui.painter().hline(rect.x_range(), rect.top(), Stroke::new(1.0f32, RULE));
+    ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, name, title_font(), if r.hovered() && sense.senses_click() { Color32::WHITE } else { TEXT });
+    (rect, r)
+}
+
 /// A section of knobs under a heading that opens and closes it. With `switch` the heading
 /// carries a checkbox that turns the section's effect on and off.
-fn section(ui: &mut Ui, name: &str, open: bool, switch: Option<&mut bool>, add: impl FnOnce(&mut Ui)) {
+pub(super) fn section(ui: &mut Ui, name: &str, open: bool, switch: Option<&mut bool>, add: impl FnOnce(&mut Ui)) {
     let mut state = CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(name), open);
-    let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+    let (rect, r) = title(ui, name, Sense::click());
     if r.clicked() {
         state.toggle(ui);
     }
     let p = ui.painter();
-    p.hline(rect.x_range(), rect.top(), Stroke::new(1.0f32, RULE));
-    p.text(rect.left_center(), Align2::LEFT_CENTER, name, FontId::proportional(12.5), if r.hovered() { Color32::WHITE } else { TEXT });
     let turn = egui::emath::Rot2::from_angle((state.openness(ui.ctx()) - 1.0) * std::f32::consts::FRAC_PI_2);
     let tip = pos2(rect.right() - 6.0, rect.center().y);
     p.add(Shape::convex_polygon([vec2(-3.5, -2.0), vec2(3.5, -2.0), vec2(0.0, 2.5)].map(|d| tip + turn * d).to_vec(), LABEL, Stroke::NONE));
@@ -296,7 +317,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
     section(ui, "Lens", true, None, |ui| {
         knob(ui, "Softness", "Blur on the film, µm", &mut s.lens_um, 0.0..=40.0, d.lens_um, 1);
         knob(ui, "Softness shape", "2 is a Gaussian; lower adds a long faint skirt", &mut s.lens_exponent, 0.6..=2.0, d.lens_exponent, 2);
-        knob(ui, "Halation", "Glow around bright areas", &mut s.halation, 0.0..=0.2, d.halation, 3);
+        knob(ui, "Halation", "Glow around bright areas", &mut s.halation, 0.0..=0.2, d.halation, 2);
         knob(ui, "Halation width", "µm", &mut s.halation_um, 10.0..=200.0, d.halation_um, 0);
     });
     section(ui, "Grain", true, None, |ui| {
@@ -313,7 +334,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
     section(ui, "Print", true, None, |ui| {
         knob(ui, "Grade", "Paper grade", &mut s.grade, -1.0..=5.0, d.grade, 2);
         knob(ui, "Exposure", "Stops; more is darker", &mut s.print_ev, -2.5..=2.5, d.print_ev, 2);
-        knob(ui, "Grey density", "Print density of a metered grey", &mut s.print_grey, 0.3..=1.3, d.print_grey, 3);
+        knob(ui, "Grey density", "Print density of a metered grey", &mut s.print_grey, 0.3..=1.3, d.print_grey, 2);
         knob(ui, "Enlarger blur", "µm on the film", &mut s.enlarger_um, 0.0..=15.0, d.enlarger_um, 1);
         knob(ui, "House tones", "0: straight print. 1: the book's tone range", &mut s.house, 0.0..=1.0, d.house, 2);
     });
@@ -324,8 +345,8 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
             Repro::Copy => {
                 knob(ui, "Copy blur", "Thousandths of the long edge", &mut s.copy_blur, 0.0..=2.0, d.copy_blur, 2);
                 knob(ui, "Copy contrast", "", &mut s.copy_gain, 0.5..=2.0, d.copy_gain, 2);
-                knob(ui, "Highlight drop", "Highlight dot lost at each printing", &mut s.copy_drop, 0.0..=0.3, d.copy_drop, 3);
-                knob(ui, "Shadow fill", "Shadow tone that closes to solid ink", &mut s.copy_fill, 0.7..=1.0, d.copy_fill, 3);
+                knob(ui, "Highlight drop", "Highlight dot lost at each printing", &mut s.copy_drop, 0.0..=0.3, d.copy_drop, 2);
+                knob(ui, "Shadow fill", "Shadow tone that closes to solid ink", &mut s.copy_fill, 0.7..=1.0, d.copy_fill, 2);
                 knob(ui, "Source ink", "Solid ink density on the source page", &mut s.copy_ink, 0.8..=2.5, d.copy_ink, 2);
             }
             Repro::Book => {
@@ -341,10 +362,10 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
                 }
                 knob(ui, "Screen", "Lines per inch", &mut s.lpi, 65.0..=200.0, d.lpi, 0);
                 knob(ui, "Ink density", "1.20 uncoated, 1.85 coated", &mut s.ink_density, 0.8..=2.2, d.ink_density, 2);
-                knob(ui, "Dot gain", "", &mut s.dot_gain, 0.0..=0.3, d.dot_gain, 3);
-                knob(ui, "Smallest dot", "", &mut s.min_dot, 0.0..=0.1, d.min_dot, 3);
-                knob(ui, "Camera blur", "Copy camera blur on the page, mm", &mut s.copy_blur_mm, 0.0..=0.2, d.copy_blur_mm, 3);
-                knob(ui, "Paper scatter", "Light spread in the paper, mm", &mut s.paper_scatter_mm, 0.0..=0.2, d.paper_scatter_mm, 3);
+                knob(ui, "Dot gain", "", &mut s.dot_gain, 0.0..=0.3, d.dot_gain, 2);
+                knob(ui, "Smallest dot", "", &mut s.min_dot, 0.0..=0.1, d.min_dot, 2);
+                knob(ui, "Camera blur", "Copy camera blur on the page, mm", &mut s.copy_blur_mm, 0.0..=0.2, d.copy_blur_mm, 2);
+                knob(ui, "Paper scatter", "Light spread in the paper, mm", &mut s.paper_scatter_mm, 0.0..=0.2, d.paper_scatter_mm, 2);
             }
         }
     });
@@ -356,8 +377,8 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
             }
             s.view = v;
             if s.view_mode() == View::Scan {
-                knob(ui, "Scan black", "Display value of solid ink", &mut s.scan_black, 0.0..=0.3, d.scan_black, 3);
-                knob(ui, "Scan white", "Page value sent to white", &mut s.scan_white, 0.7..=1.0, d.scan_white, 3);
+                knob(ui, "Scan black", "Display value of solid ink", &mut s.scan_black, 0.0..=0.3, d.scan_black, 2);
+                knob(ui, "Scan white", "Page value sent to white", &mut s.scan_white, 0.7..=1.0, d.scan_white, 2);
             }
         });
     }

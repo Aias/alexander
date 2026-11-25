@@ -15,6 +15,8 @@ pub enum Job {
     Collect(Vec<PathBuf>),
     Open { id: Id, path: PathBuf },
     Full { id: Id, path: PathBuf, long: u32 },
+    /// A picture for the reference, at `reference::LONG`.
+    Reference(PathBuf),
     Encode { pic: Box<Picture>, size: Size, original_long: u32, format: Format, record: Box<Record>, path: PathBuf },
 }
 
@@ -22,6 +24,7 @@ pub enum Done {
     Collected(Vec<PathBuf>),
     Opened { id: Id, result: Result<Box<Opened>, String> },
     Full { id: Id, long: u32, result: Result<Pixels, String> },
+    Reference { path: PathBuf, result: Result<Pixels, String> },
     Encoded { path: PathBuf, result: Result<(), String> },
 }
 
@@ -120,6 +123,10 @@ fn work(job: Job) -> Done {
         Job::Collect(paths) => Done::Collected(catch_unwind(AssertUnwindSafe(|| load::collect(&paths))).unwrap_or_default()),
         Job::Open { id, path } => Done::Opened { id, result: catch_unwind(AssertUnwindSafe(|| load::open(&path).map(Box::new))).unwrap_or_else(|e| Err(caught(e))) },
         Job::Full { id, path, long } => Done::Full { id, long, result: catch_unwind(AssertUnwindSafe(|| load::full(&path, long))).unwrap_or_else(|e| Err(caught(e))) },
+        Job::Reference(path) => {
+            let result = catch_unwind(AssertUnwindSafe(|| load::full(&path, super::reference::LONG))).unwrap_or_else(|e| Err(caught(e)));
+            Done::Reference { path, result }
+        }
         Job::Encode { pic, size, original_long, format, record, path } => {
             let result = catch_unwind(AssertUnwindSafe(|| export::write(&pic, size, original_long, format, &record, &path))).unwrap_or_else(|e| Err(caught(e)));
             Done::Encoded { path, result }

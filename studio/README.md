@@ -21,8 +21,8 @@ but not the app. The macOS bundle is made by the scripts in `macos/`.
 
 ## Working in it
 
-Open photos with Open… (⌘O), by dropping files or folders on the window, or by naming
-them on the command line. On macOS, Open from Photos… (⇧⌘O) shows the system's Photos
+Open photos with Open… (⌘O), by dropping files or folders on the window or on the Dock
+icon, with Open With in the Finder, or by naming them on the command line. On macOS, Open from Photos… (⇧⌘O) shows the system's Photos
 picker, with the library's albums and search, and takes any number of photos. The picker
 hands each photo over in its original format for a moment only, so the app copies it to
 `~/Library/Caches/studio.alexander.app/Photos`, in a folder per photo. The same photo
@@ -33,50 +33,98 @@ selected photo at once. Original shows the photo as it is; Film applies the proc
 Moving a knob changes that knob on all selected photos and leaves their other knobs as
 they are, so photos can share some settings and differ in others. The histogram at the
 top of the panel counts the tones of the focused photo as it is shown, from its 640 px
-copy.
+copy. The triangle in each of its top corners lights when shadows or highlights clip to
+pure black or white; clicking either, or J, marks those values in Survey and Detail,
+highlights red and shadows blue.
+
+A rail of tools runs down the window's right edge, as in Lightroom. Edit shows the knobs in
+the panel and Crop the crop; clicking the tool the panel shows hides the panel. Reference
+shows the reference or hides it.
+
+The library is remembered between launches: its photos with their looks, virtual copies
+and stars, the selection, the view, the thumbnail size and whether cells are filled. The app writes it to
+`~/Library/Application Support/studio.alexander.app/library.json` (on Linux,
+`~/.local/share/alexander-studio`) at most once a second while it changes and when it
+quits, and opens the photos again from their files at the next launch. A photo whose file
+has gone shows as an empty tile with a mark, its error in the tooltip.
 
 A look is a set of numbers and nothing else. Every render, on screen or exported, starts
 again from the original file, so changing a look never processes a processed picture.
 
 Three views, named as in Lightroom: Grid, all photos (G); Survey, the selected photos side
-by side (N); and Loupe, one photo large (E, Return, or double-click). Survey and Loupe
+by side (N); and Detail, one photo large (E, Return, or double-click). Survey and Detail
 have a filmstrip. The bar under the view counts the photos and the selection, names the
-focused photo, holds the compare switches, and holds the thumbnail size in the grid and
-the zoom in the loupe.
+focused photo, holds the compare switches, and holds the view's own settings: in Grid
+and Survey, Fit or Fill, and in Grid the thumbnail size; in Detail the zoom. Fit shows
+each photo whole inside its cell; Fill covers the cell with it and cuts off what is over.
+
+A cell names its photo; on macOS the SF Symbol for film beside the name marks a photo
+the process is on for. A star marks the photos worth keeping. It shows in the top-right corner of a starred photo's
+cell, and under the pointer in that corner of any other, where a click stars that photo
+alone. In Detail the star in the bar under the photo, or S, stars the photo shown.
+Starred Only at the left of the bar shows only the starred photos; the arrow keys, ⇧-click and
+Select All then go through those alone. Opening photos shows every photo again.
 
 Before (`\`) shows the photo itself in place of its render. Split (Y) shows both, in
-Survey and Loupe, with the photo itself left of a divider and the render right of it. Drag
-the divider to move it, and press Swap to put the photo itself on the right. Moving the
-divider draws the picture again without rendering it again.
+Survey and Detail, with the photo itself left of a divider and the render right of it. Drag
+the divider to move it, double-click it to put it back in the middle, and press Swap to
+put the photo itself on the right. Moving the divider draws the picture again without
+rendering it again.
 
-Right-clicking a photo opens a menu of what can be done to it: open it in the loupe, show
-it in the Finder, copy its file path, copy its finished picture as an image, switch the
+A virtual copy is a second entry for the same file with a look of its own, so that two
+looks of one photo can stand side by side in Survey. It follows its photo in the library
+and is named for it, as in "IMG_1414.jpeg · Copy 1". Opening an export of a photo already
+in the library shows its look on the copy that has it, on the photo when the photo has no
+look, or else on a new virtual copy.
+
+The reference (⇧R, or Reference in the rail; as Lightroom's Reference View) shows a picture
+to work against, such as a scanned page of the book, beside the photo being edited. Its
+pictures are the ones in the app's data folder under `References`, in order of their
+names, and it goes through them with ‹ and ›. Add…, or dropping pictures on its own
+window, copies pictures there; right-clicking the picture shows it in the Finder or moves
+it to the Trash. It floats over the main window, where it can be moved, resized and
+closed, or Pop Out puts it in a window of its own, which can stand anywhere, on another
+screen too.
+
+Right-clicking a photo opens a menu of what can be done to it: open it in Detail, show
+it in the Finder, copy its file path, copy its finished picture as an image, make a
+virtual copy, star it, switch the
 process on or off, copy, paste or reset its look, export it, or remove it from the
 library. As in the Finder, a photo outside the selection becomes the selection first, so
 the commands act on every photo selected. Copy Image copies the photo clicked at the size
 of its simulation grid, cut to the picture inside its border when the look strips it.
+
+On macOS the menu bar holds every command with its key: File (with Open Recent, the
+folders photos were opened from lately), Edit, Photo, View and Window. Keys with ⌘ go to
+the menu; plain keys go to the window, which leaves them to text being typed.
 
 | Keys | Does |
 | --- | --- |
 | ⌘O | Open photos |
 | ⇧⌘O | Open from the Photos library (macOS) |
 | ⇧⌘E | Export the selected photos |
-| G / N / E or Return | Grid / Survey / Loupe |
+| G / N / E or Return | Grid / Survey / Detail |
 | Esc | Back to the grid |
 | Arrow keys | Next or previous photo; ⇧ extends the selection in the library |
 | ⌘A / ⌘D | Select all / none |
 | Delete or Backspace | Remove from the library (the file stays on disk; ⌘Z puts it back) |
 | V | Switch the process on or off for the selection |
+| S | Star the selection, or in Detail the photo shown, or take the stars away |
+| ⌘' | Make a virtual copy of each selected photo |
+| ⌘R | Show the selected photos in the Finder |
+| ⇧R | Show or hide the reference |
 | \\ | Before |
 | Y | Split before and after |
+| J | Mark clipped highlights red and clipped shadows blue |
+| R | Crop the focused photo; Return or R again keeps the crop, Esc leaves it |
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |
 | ⇧⌘R | Reset the film settings of the selection to the defaults |
 | ⌘Z / ⇧⌘Z | Undo and redo changes to looks |
-| Z, or click | Loupe: fit, or 100% about the point clicked |
-| ⌘0 / ⌘1 | Loupe: fit / 100% |
+| Z, or click | Detail: fit, or 100% about the point clicked |
+| ⌘0 / ⌘1 | Detail: fit / 100% |
 | ⌘+ / ⌘− | Zoom in and out; in the library, larger and smaller thumbnails |
-| Scroll or pinch | Loupe: zoom about the pointer |
-| Drag | Loupe: move the photo |
+| Scroll or pinch | Detail: zoom about the pointer |
+| Drag | Detail: move the photo |
 | Tab | Show or hide the panel |
 
 Border, in the Exposure section, deals with a uniform border round the picture, such as
@@ -85,14 +133,33 @@ the paper of a photographed print or letterbox bars, found when the photo is ope
 border and leaves it in the picture; Strip does the same and shows and exports only the
 picture inside, in every view and thumbnail, without rendering again; Off does not look.
 
+Crop (R, or Crop in the rail) works on one photo at a time, in Detail, and holds the panel
+while it lasts. It shows the whole photo with a level frame over it: drag the frame or its
+handles to move or size it. Dragging just outside a corner, where the pointer becomes a
+curved arrow, turns the photo under the frame, as does Straighten, up to 45° either way.
+Moving to another photo in Detail gives the photo left its crop and goes on to crop the next. The frame
+keeps the photo's own aspect unless another one is chosen, or Free, and never leaves the
+photo, shrinking when a turn would take a corner off it. Return, R or Done keeps the crop
+as one step undo takes back; Esc or Cancel leaves the photo as it was. The crop is part of
+the look, so exports, thumbnails and the histogram show it, but presets and pasted looks
+leave each photo's own crop alone, and Reset takes it away. A stripped border is a crop
+of the picture inside it, at no angle.
+
+Presets head the panel, closed until opened. Resting the pointer on one shows it on the focused photo, and a
+click gives it to every selected photo, in one step that undo takes back. Four come with
+the app: Default, Harder (grade 4.25 at print exposure 0), Copied from a Page and Book
+Page (ink on cream paper). New Preset… keeps the focused photo's look under a name, as a
+look file in the app's data folder under `Presets`; right-clicking one of these updates it
+with the current look, shows it in the Finder or deletes it.
+
 The knobs are grouped as the process runs: Film, Exposure, Lens, Grain, Edge Effects
 (switched on and off at its heading), Print, Reproduction and Simulation. Clicking a
 heading opens or closes it. A setting off its default underlines its name under the
 pointer, and clicking the name restores the default; double-clicking a slider does the
-same. A slider's value can also be dragged or typed. Stock, Filter, Border and Finish are
+same. A slider's value, shown to two decimals at most, can also be dragged or typed. Stock, Filter, Border and Finish are
 rows of toggles; the full names of the stocks and finishes are in their tooltips. Copy, Paste and Reset sit under the knobs, and the
-panel's … menu saves and loads looks as JSON and copies the look as `twb2.py` flags. In
-the loupe 100% means one pixel of the simulation grid to one pixel of the screen.
+panel's ••• menu saves and loads looks as JSON and copies the look as `twb2.py` flags. In
+Detail 100% means one pixel of the simulation grid to one pixel of the screen.
 
 ## Exports
 
@@ -172,16 +239,10 @@ and quit.
 
 ## Known limits
 
-- Files opened from the Finder with Open With, or dropped on the Dock icon, arrive as
-  macOS open-document events, which the windowing library does not pass on. Drop them on
-  the window or use Open… instead.
 - HEIC and camera raw files are read through `sips`, which ships with macOS, as a PNG
   that keeps the file's colour profile. Raw files come out as `sips` develops them.
 - JPEG exports carry no embedded ICC profile; untagged JPEG is read as sRGB by browsers
   and photo apps, which is what the values are. PNG exports carry the sRGB chunk.
-- There is no native menu bar; less frequent commands are in the panel's … menu.
-- The library lasts as long as the window; looks live on in exported files and in saved
-  JSON, not in a catalogue.
 - Exporting reads each finished picture back from the GPU on the interface thread, so the
   window pauses for a moment per photo while an export runs.
 - Speed has been measured only on a software GPU, where absolute numbers mean little.
