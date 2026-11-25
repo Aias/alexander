@@ -52,7 +52,7 @@ fn run(precision: Precision) {
         let auto = tone::auto_ev(median, top, s.auto_ev_target);
         let plan = planner.plan(&s, (w, h), auto, None, engine.gpu.max_dim);
         engine.render(&mut photo, &plan);
-        let (_, _, rgba) = engine.read_display(&mut photo, &plan.view);
+        let (_, _, rgba) = engine.read_display(&mut photo, &plan.view, 1);
         let got: Vec<f32> = rgba.as_chunks::<4>().0.iter().map(|p| p[1]).collect();
         let want: Vec<f32> = image::open(fixtures().join(format!("render_{name}.png"))).unwrap().into_luma16().as_raw().iter().map(|&v| v as f32 / 65535.0).collect();
         assert_eq!(got.len(), want.len(), "{name}: size");
@@ -101,10 +101,10 @@ fn stages_are_reused() {
     ] {
         let p = plan(&s);
         assert_eq!(engine.render(&mut photo, &p), Some(stage));
-        let (_, _, kept) = engine.read_display(&mut photo, &p.view);
+        let (_, _, kept) = engine.read_display(&mut photo, &p.view, 1);
         let mut fresh = engine.upload(scene.as_raw(), w, h);
         engine.render(&mut fresh, &p);
-        let (_, _, scratch) = engine.read_display(&mut fresh, &p.view);
+        let (_, _, scratch) = engine.read_display(&mut fresh, &p.view, 1);
         let (mean, _, max) = differences(&kept, &scratch);
         assert!(max < 1e-6, "reused stages differ from a fresh render at {stage:?}: mean {mean}, max {max}");
     }
@@ -135,7 +135,7 @@ fn grain_statistics_match_python() {
     for (name, s) in cases {
         let plan = planner.plan(&s, (w, h), 0.0, None, engine.gpu.max_dim);
         engine.render(&mut photo, &plan);
-        let (_, _, rgba) = engine.read_display(&mut photo, &plan.view);
+        let (_, _, rgba) = engine.read_display(&mut photo, &plan.view, 1);
         let at = |x: usize, y: usize| rgba[(y * w as usize + x) * 4 + 1] as f64;
         for (i, want) in fx["cases"][name]["bands"].as_array().unwrap().iter().enumerate() {
             let (x0, x1, y0, y1) = (i * bw + margin, (i + 1) * bw - margin, margin, h as usize - margin);

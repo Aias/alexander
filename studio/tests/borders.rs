@@ -87,7 +87,7 @@ fn framed_render_matches_python() {
     let mut render = |s: &Settings| {
         let plan = planner.plan(s, (w, h), auto, Some(area), engine.gpu.max_dim);
         engine.render(&mut photo, &plan);
-        let (pw, ph, rgba) = engine.read_display(&mut photo, &plan.view);
+        let (pw, ph, rgba) = engine.read_display(&mut photo, &plan.view, 1);
         Picture { w: pw, h: ph, rgba }
     };
     let keep = render(&s);
@@ -142,13 +142,13 @@ fn area_reuses_stages() {
     assert_eq!(engine.render(&mut photo, &p_off), Some(Stage::Optics));
     assert_eq!(engine.render(&mut photo, &p_keep), Some(Stage::Finish));
     assert_eq!(engine.render(&mut photo, &p_strip), None);
-    let (_, _, kept) = engine.read_display(&mut photo, &p_keep.view);
+    let (_, _, kept) = engine.read_display(&mut photo, &p_keep.view, 1);
     let mut fresh = engine.upload(img.as_raw(), w, h);
     engine.render(&mut fresh, &p_keep);
-    let (_, _, scratch) = engine.read_display(&mut fresh, &p_keep.view);
+    let (_, _, scratch) = engine.read_display(&mut fresh, &p_keep.view, 1);
     assert!(kept.iter().zip(&scratch).all(|(a, b)| (a - b).abs() < 1e-6), "a reused render differs from a fresh one");
     engine.render(&mut photo, &p_off);
-    let (_, _, back) = engine.read_display(&mut photo, &p_off.view);
+    let (_, _, back) = engine.read_display(&mut photo, &p_off.view, 1);
     assert!(back.iter().zip(&kept).any(|(a, b)| (a - b).abs() > 1e-3), "the house tones were not measured afresh");
 }
 
