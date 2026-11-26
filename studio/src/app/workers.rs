@@ -15,7 +15,7 @@ pub enum Job {
     Collect(Vec<PathBuf>),
     Open { id: Id, path: PathBuf },
     Full { id: Id, path: PathBuf, long: u32 },
-    /// A picture for the reference, at `reference::LONG`.
+    /// A picture for the reference, at its own size up to `reference::LONG`.
     Reference(PathBuf),
     Encode { pic: Box<Picture>, size: Size, original_long: u32, format: Format, record: Box<Record>, path: PathBuf },
 }
@@ -124,7 +124,10 @@ fn work(job: Job) -> Done {
         Job::Open { id, path } => Done::Opened { id, result: catch_unwind(AssertUnwindSafe(|| load::open(&path).map(Box::new))).unwrap_or_else(|e| Err(caught(e))) },
         Job::Full { id, path, long } => Done::Full { id, long, result: catch_unwind(AssertUnwindSafe(|| load::full(&path, long))).unwrap_or_else(|e| Err(caught(e))) },
         Job::Reference(path) => {
-            let result = catch_unwind(AssertUnwindSafe(|| load::full(&path, super::reference::LONG))).unwrap_or_else(|e| Err(caught(e)));
+            let result = catch_unwind(AssertUnwindSafe(|| load::decode(&path).map(|px| {
+                let long = px.w.max(px.h).min(super::reference::LONG);
+                load::resized(px, long)
+            }))).unwrap_or_else(|e| Err(caught(e)));
             Done::Reference { path, result }
         }
         Job::Encode { pic, size, original_long, format, record, path } => {

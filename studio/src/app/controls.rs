@@ -29,6 +29,7 @@ impl App {
             return;
         }
         let processed = focus.is_some_and(|it| it.look.is_some());
+        let bordered = focus.is_some_and(|it| it.frame.is_some());
         let mut s = focus.and_then(|it| it.look.clone().or_else(|| it.stash.clone())).unwrap_or_default();
         let enabled = focus.is_some();
         let can_paste = self.clipboard.is_some();
@@ -42,7 +43,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).content_margin(EDGE).show(ui, |ui| {
             ui.add_enabled_ui(enabled, |ui| {
                 self.presets_ui(ui);
-                knobs(ui, &mut s);
+                knobs(ui, &mut s, bordered);
             });
         });
         if enabled && s != before {
@@ -191,17 +192,22 @@ fn name(ui: &mut Ui, label: &str, tip: &str, changed: bool) -> bool {
 /// restores the default; the value can be dragged or typed, past the slider's ends too.
 pub(super) fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize) {
     ui.horizontal(|ui| {
-        let reset = name(ui, label, tip, *v != default);
-        let speed = (range.end() - range.start()) / 300.0;
-        let w = ui.available_width() - VALUE_W - ui.spacing().item_spacing.x;
-        let r = slider(ui, v, range, w);
-        ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-        ui.spacing_mut().button_padding.x = 2.0;
-        ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).custom_formatter(|v, _| format!("{v:.decimals$}")));
-        if reset || r.double_clicked() {
+        if name(ui, label, tip, *v != default) {
             *v = default;
         }
+        dial(ui, v, range, default, decimals);
     });
+}
+fn dial(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize) {
+    let speed = (range.end() - range.start()) / 300.0;
+    let w = ui.available_width() - VALUE_W - ui.spacing().item_spacing.x;
+    let r = slider(ui, v, range, w);
+    ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    ui.spacing_mut().button_padding.x = 2.0;
+    ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).custom_formatter(|v, _| format!("{v:.decimals$}")));
+    if r.double_clicked() {
+        *v = default;
+    }
 }
 
 /// A named row of controls; true when the name was clicked to restore the default.
@@ -272,7 +278,7 @@ pub(super) fn section(ui: &mut Ui, name: &str, open: bool, switch: Option<&mut b
     });
 }
 
-fn knobs(ui: &mut Ui, s: &mut Settings) {
+fn knobs(ui: &mut Ui, s: &mut Settings, bordered: bool) {
     let d = Settings::default();
     section(ui, "Film", true, None, |ui| {
         let stock = |k: FilmKind| match k {
@@ -308,13 +314,18 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
         }
     });
     section(ui, "Exposure", true, None, |ui| {
-        check(ui, "Auto", "", &mut s.auto_ev, d.auto_ev);
-        if s.auto_ev {
-            knob(ui, "Auto target", "Display value the median is placed at", &mut s.auto_ev_target, 0.2..=0.7, d.auto_ev_target, 2);
-        }
+        ui.horizontal(|ui| {
+            if name(ui, "Auto", "Display value the median is placed at", s.auto_ev != d.auto_ev || s.auto_ev_target != d.auto_ev_target) {
+                (s.auto_ev, s.auto_ev_target) = (d.auto_ev, d.auto_ev_target);
+            }
+            ui.add(egui::Checkbox::without_text(&mut s.auto_ev));
+            ui.add_enabled_ui(s.auto_ev, |ui| dial(ui, &mut s.auto_ev_target, 0.2..=0.7, d.auto_ev_target, 2));
+        });
         knob(ui, "Exposure", "Stops", &mut s.ev, -3.0..=3.0, d.ev, 2);
-        let border = "A uniform border round the picture, such as a print's paper or letterbox bars. Keep: exposure and tones are measured inside it. Strip: the same, and only the picture inside is shown and exported. Off: not looked for";
-        toggles(ui, "Border", border, &mut s.frame, d.frame, &[(Frame::Keep, "Keep", ""), (Frame::Strip, "Strip", ""), (Frame::Off, "Off", "")]);
+        if bordered {
+            let border = "A uniform border round the picture, such as a print's paper or letterbox bars. Keep: exposure and tones are measured inside it. Strip: the same, and only the picture inside is shown and exported. Off: not looked for";
+            toggles(ui, "Border", border, &mut s.frame, d.frame, &[(Frame::Keep, "Keep", ""), (Frame::Strip, "Strip", ""), (Frame::Off, "Off", "")]);
+        }
     });
     section(ui, "Lens", true, None, |ui| {
         knob(ui, "Softness", "Blur on the film, µm", &mut s.lens_um, 0.0..=40.0, d.lens_um, 1);
@@ -368,30 +379,21 @@ fn knobs(ui: &mut Ui, s: &mut Settings) {
                 knob(ui, "Smallest dot", "", &mut s.min_dot, 0.0..=0.1, d.min_dot, 2);
                 knob(ui, "Camera blur", "Copy camera blur on the page, mm", &mut s.copy_blur_mm, 0.0..=0.2, d.copy_blur_mm, 2);
                 knob(ui, "Paper scatter", "Light spread in the paper, mm", &mut s.paper_scatter_mm, 0.0..=0.2, d.paper_scatter_mm, 2);
+                let mut v = s.view;
+                if row(ui, "View", "", v != d.view, |ui| combo(ui, "view", &mut v, &[(None, "Auto"), (Some(View::Scan), "Scan"), (Some(View::White), "Ink on white"), (Some(View::Page), "Ink on cream"), (Some(View::Print), "Print")])) {
+                    v = d.view;
+                }
+                s.view = v;
+                if s.view_mode() == View::Scan {
+                    knob(ui, "Scan black", "Display value of solid ink", &mut s.scan_black, 0.0..=0.3, d.scan_black, 2);
+                    knob(ui, "Scan white", "Page value sent to white", &mut s.scan_white, 0.7..=1.0, d.scan_white, 2);
+                }
             }
         }
     });
-    if s.repro == Repro::Book {
-        section(ui, "Viewing", true, None, |ui| {
-            let mut v = s.view;
-            if row(ui, "View", "", v != d.view, |ui| combo(ui, "view", &mut v, &[(None, "Auto"), (Some(View::Scan), "Scan"), (Some(View::White), "Ink on white"), (Some(View::Page), "Ink on cream"), (Some(View::Print), "Print")])) {
-                v = d.view;
-            }
-            s.view = v;
-            if s.view_mode() == View::Scan {
-                knob(ui, "Scan black", "Display value of solid ink", &mut s.scan_black, 0.0..=0.3, d.scan_black, 2);
-                knob(ui, "Scan white", "Page value sent to white", &mut s.scan_white, 0.7..=1.0, d.scan_white, 2);
-            }
-        });
-    }
     section(ui, "Simulation", false, None, |ui| {
         let mut grid = s.detail_px as f64;
         knob(ui, "Grid", "Long edge of the simulation grid, px. 0 is the photo's own size", &mut grid, 0.0..=8192.0, d.detail_px as f64, 0);
         s.detail_px = ((grid / 32.0).round() * 32.0).clamp(0.0, 16384.0) as u32;
-        if row(ui, "Seed", "Grain pattern", s.seed != d.seed, |ui| {
-            ui.add(DragValue::new(&mut s.seed).range(0..=u32::MAX));
-        }) {
-            s.seed = d.seed;
-        }
     });
 }

@@ -208,10 +208,13 @@ fn film_weights() -> &'static [[[f64; 3]; 4]; 3] {
 
 /// The photo at the size of its simulation grid.
 pub fn full(path: &Path, long: u32) -> Result<Pixels, String> {
-    let px = decode(path)?;
+    decode(path).map(|px| resized(px, long))
+}
+
+pub fn resized(px: Pixels, long: u32) -> Pixels {
     let (w, h) = resize::fit_long(px.w, px.h, long);
     let rgba = resize::rgba8(&px.rgba, px.w, px.h, w, h);
-    Ok(Pixels { w, h, rgba })
+    Pixels { w, h, rgba }
 }
 
 #[cfg(test)]

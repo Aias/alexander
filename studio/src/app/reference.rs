@@ -6,7 +6,7 @@
 use super::views::LABEL;
 use super::workers::Job;
 use super::{session, App, Dialog};
-use egui::{Align, Button, Color32, Layout, RichText, TextureHandle, Ui, ViewportBuilder, ViewportId};
+use egui::{Align, Button, Color32, CursorIcon, Layout, Pos2, Rect, RichText, Sense, TextureHandle, Ui, Vec2, ViewportBuilder, ViewportId};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -17,12 +17,15 @@ pub struct Reference {
     pub shown: bool,
     /// In a window of its own rather than over the main window.
     pub apart: bool,
+    /// Points to a picture pixel, and the picture point at the middle of the view; none
+    /// while the picture fits the view.
+    pub zoom: Option<(f32, Pos2)>,
     /// Pictures read, or why they could not be; none yet while one is being read.
     loaded: HashMap<PathBuf, Option<Result<TextureHandle, String>>>,
 }
 
-/// Long edge pictures are read at: sharp in a large window, small on the GPU.
-pub const LONG: u32 = 2048;
+/// Longest edge a picture is read at, the most a texture holds.
+pub const LONG: u32 = 8192;
 
 fn folder() -> PathBuf {
     session::data_dir().join("References")
@@ -38,7 +41,12 @@ fn listed() -> Vec<PathBuf> {
 
 impl Reference {
     pub fn new() -> Reference {
-        Reference { pictures: listed(), at: 0, shown: false, apart: false, loaded: HashMap::new() }
+        Reference { pictures: listed(), at: 0, shown: false, apart: false, zoom: None, loaded: HashMap::new() }
+    }
+
+    fn show(&mut self, at: usize) {
+        self.at = at;
+        self.zoom = None;
     }
 
     fn current(&self) -> Option<&PathBuf> {
@@ -58,7 +66,7 @@ impl Reference {
         }
         self.pictures = listed();
         if let Some(i) = first.and_then(|f| self.pictures.iter().position(|p| *p == f)) {
-            self.at = i;
+            self.show(i);
             self.shown = true;
         }
     }
@@ -73,7 +81,7 @@ impl Reference {
         if gone {
             self.loaded.remove(&p);
             self.pictures = listed();
-            self.at = self.at.min(self.pictures.len().saturating_sub(1));
+            self.show(self.at.min(self.pictures.len().saturating_sub(1)));
         }
     }
 
@@ -89,7 +97,11 @@ impl App {
         if !self.reference.shown {
             return;
         }
-        if let Some(p) = self.reference.current().cloned() {
+        let n = self.reference.pictures.len();
+        let at = self.reference.at.min(n.saturating_sub(1));
+        let near: Vec<PathBuf> = (0..n.min(3)).map(|k| self.reference.pictures[(at + n + k - 1) % n].clone()).collect();
+        self.reference.loaded.retain(|p, _| near.contains(p));
+        for p in near {
             self.reference.loaded.entry(p.clone()).or_insert_with(|| {
                 self.workers.send(Job::Reference(p));
                 None
@@ -117,10 +129,10 @@ impl App {
         let n = self.reference.pictures.len();
         ui.horizontal(|ui| {
             if ui.add_enabled(n > 1, Button::new("‹")).clicked() {
-                self.reference.at = (self.reference.at + n - 1) % n;
+                self.reference.show((self.reference.at + n - 1) % n);
             }
             if ui.add_enabled(n > 1, Button::new("›")).clicked() {
-                self.reference.at = (self.reference.at + 1) % n;
+                self.reference.show((self.reference.at + 1) % n);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button(if self.reference.apart { "Pop In" } else { "Pop Out" }).clicked() {
@@ -139,11 +151,14 @@ impl App {
             });
         });
         let area = ui.available_rect_before_wrap();
+        let r = ui.allocate_rect(area, Sense::click_and_drag());
         ui.painter().rect_filled(area, egui::CornerRadius::same(4), super::views::VIEW_BG);
         match self.reference.current().and_then(|p| self.reference.loaded.get(p)) {
             Some(Some(Ok(t))) => {
-                let s = (area.width() / t.size_vec2().x).min(area.height() / t.size_vec2().y);
-                ui.painter().image(t.id(), egui::Rect::from_center_size(area.center(), t.size_vec2() * s), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                let size = t.size_vec2();
+                let (z, c) = zoomed(ui, &r, area, size, &mut self.reference.zoom);
+                let shown = Rect::from_center_size(area.center() + (size / 2.0 - c.to_vec2()) * z, size * z);
+                ui.painter_at(area).image(t.id(), shown, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
             }
             Some(Some(Err(e))) => {
                 ui.put(area.shrink(12.0), egui::Label::new(RichText::new(e.as_str()).color(LABEL)));
@@ -159,7 +174,7 @@ impl App {
         if n == 0 {
             return;
         }
-        ui.allocate_rect(area, egui::Sense::click()).context_menu(|ui| {
+        r.context_menu(|ui| {
             #[cfg(target_os = "macos")]
             if let (true, Some(p)) = (ui.button("Show in Finder").clicked(), self.reference.current().cloned()) {
                 std::thread::spawn(move || std::process::Command::new("/usr/bin/open").arg("-R").arg(p).status());
@@ -171,4 +186,45 @@ impl App {
             }
         });
     }
+}
+
+fn zoomed(ui: &Ui, r: &egui::Response, area: Rect, size: Vec2, zoom: &mut Option<(f32, Pos2)>) -> (f32, Pos2) {
+    let fit = (area.width() / size.x).min(area.height() / size.y);
+    let actual = 1.0 / ui.ctx().pixels_per_point();
+    let (mut z, mut c) = zoom.unwrap_or((fit, (size / 2.0).to_pos2()));
+    let mut on = zoom.is_some();
+    if let Some(h) = r.hover_pos() {
+        let (scroll, factor) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta()));
+        c -= scroll / z;
+        if (factor - 1.0).abs() > 1e-4 {
+            let g = c + (h - area.center()) / z;
+            z = (z * factor).clamp(fit.min(actual) * 0.5, 16.0 * actual);
+            c = g - (h - area.center()) / z;
+            on = true;
+        }
+    }
+    if r.dragged() {
+        c -= r.drag_delta() / z;
+    }
+    if r.clicked() {
+        on = !on;
+        if let (true, Some(h)) = (on, r.interact_pointer_pos()) {
+            let g = c + (h - area.center()) / z;
+            z = actual;
+            c = g - (h - area.center()) / z;
+        }
+    }
+    if r.hovered() {
+        ui.ctx().set_cursor_icon(if !on { CursorIcon::ZoomIn } else if r.dragged() { CursorIcon::Grabbing } else { CursorIcon::Grab });
+    }
+    if !on {
+        *zoom = None;
+        return (fit, (size / 2.0).to_pos2());
+    }
+    for i in 0..2 {
+        let half = area.size()[i] / (2.0 * z);
+        c[i] = if size[i] <= 2.0 * half { size[i] / 2.0 } else { c[i].clamp(half, size[i] - half) };
+    }
+    *zoom = Some((z, c));
+    (z, c)
 }

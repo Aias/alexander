@@ -164,8 +164,8 @@ pub struct App {
     reference: reference::Reference,
     /// A crop being drawn on the focused photo in Detail.
     cropping: Option<crop::CropEdit>,
-    /// The name of a preset being made, while it is typed.
-    new_preset: Option<String>,
+    /// A preset being named, while it is typed.
+    new_preset: Option<presets::Draft>,
     /// The preset under the pointer this frame, to show on the focused photo.
     preview_wanted: Option<(Id, Settings)>,
     #[cfg(target_os = "macos")]

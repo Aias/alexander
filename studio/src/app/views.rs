@@ -577,8 +577,10 @@ impl App {
         let mut c = if self.zoom.is_none() { [gwf / 2.0, ghf / 2.0] } else { [self.center[0] * gwf, self.center[1] * ghf] };
         // zoom about the cursor: the photo point under it stays under it
         if let Some(hover) = resp.hover_pos() {
-            let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
-            let factor = pinch * (scroll * 0.004).exp();
+            let (scroll, factor) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta()));
+            if self.zoom.is_some() {
+                c = [c[0] - scroll.x * ppp / z, c[1] - scroll.y * ppp / z];
+            }
             if (factor - 1.0).abs() > 1e-4 {
                 let hp = [hover.x * ppp, hover.y * ppp];
                 let g = [c[0] + (hp[0] - vc[0]) / z, c[1] + (hp[1] - vc[1]) / z];

@@ -146,19 +146,24 @@ impl Shots {
             21 if settled && self.idle >= 90 => self.shot(ctx, "11-crop-reference"),
             22 => {
                 app.cropping = None;
+                app.reference.zoom = Some((1.0 / ctx.pixels_per_point(), egui::pos2(1500.0, 2200.0)));
+                self.step += 1;
+            }
+            23 if settled && self.idle >= 30 => self.shot(ctx, "12-reference-zoom"),
+            24 => {
                 app.reference.shown = false;
                 app.open_export();
                 self.step += 1;
             }
-            23 if settled && self.idle >= 12 => self.shot(ctx, "12-export"),
-            24 => {
+            25 if settled && self.idle >= 12 => self.shot(ctx, "13-export"),
+            26 => {
                 app.export_form = None;
                 let dir = self.dir.join("export");
                 let _ = std::fs::create_dir_all(&dir);
                 app.start_export(ExportForm { dir, dir_ok: true, format: Format::Png8, size: SizeChoice::Original, long: 0 });
                 self.step += 1;
             }
-            25 if settled => {
+            27 if settled => {
                 eprintln!("export finished; errors: {:?}", app.export_errors);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 self.step += 1;

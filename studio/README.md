@@ -82,7 +82,8 @@ to work against, such as a scanned page of the book, beside the photo being edit
 pictures are the ones in the app's data folder under `References`, in order of their
 names, and it goes through them with ‹ and ›. Add…, or dropping pictures on its own
 window, copies pictures there; right-clicking the picture shows it in the Finder or moves
-it to the Trash. It floats over the main window, where it can be moved, resized and
+it to the Trash. Pictures are shown at full size: it zooms and moves as Detail does, by
+pinching, scrolling, clicking and dragging. It floats over the main window, where it can be moved, resized and
 closed, or Pop Out puts it in a window of its own, which can stand anywhere, on another
 screen too.
 
@@ -123,13 +124,13 @@ the menu; plain keys go to the window, which leaves them to text being typed.
 | Z, or click | Detail: fit, or 100% about the point clicked |
 | ⌘0 / ⌘1 | Detail: fit / 100% |
 | ⌘+ / ⌘− | Zoom in and out; in the library, larger and smaller thumbnails |
-| Scroll or pinch | Detail: zoom about the pointer |
-| Drag | Detail: move the photo |
+| Pinch, or scroll with ⌘ | Detail: zoom about the pointer |
+| Scroll or drag | Detail: move a zoomed photo |
 | Tab | Show or hide the panel |
 
 Border, in the Exposure section, deals with a uniform border round the picture, such as
 the paper of a photographed print or letterbox bars, found when the photo is opened as
-`twb2.py --frame` finds it. Keep (the default) measures exposure and tones inside the
+`twb2.py --frame` finds it. It shows only for a photo with such a border. Keep (the default) measures exposure and tones inside the
 border and leaves it in the picture; Strip does the same and shows and exports only the
 picture inside, in every view and thumbnail, without rendering again; Off does not look.
 
@@ -145,15 +146,17 @@ the look, so exports, thumbnails and the histogram show it, but presets and past
 leave each photo's own crop alone, and Reset takes it away. A stripped border is a crop
 of the picture inside it, at no angle.
 
-Presets head the panel, closed until opened. Resting the pointer on one shows it on the focused photo, and a
-click gives it to every selected photo, in one step that undo takes back. Four come with
-the app: Default, Harder (grade 4.25 at print exposure 0), Copied from a Page and Book
-Page (ink on cream paper). New Preset… keeps the focused photo's look under a name, as a
-look file in the app's data folder under `Presets`; right-clicking one of these updates it
-with the current look, shows it in the Finder or deletes it.
+Presets head the panel, closed until opened. Resting the pointer on one shows it on the
+focused photo, with its description, and a click gives it to every selected photo, in one
+step that undo takes back. Four come with the app: Default, Harder (grade 4.25 at print
+exposure 0), Copied from a Page and Book Page (seen as a scan of the page). New Preset…
+keeps the focused photo's look under a name and an optional description, as a look file
+in the app's data folder under `Presets`; right-clicking one of these updates it with the
+current look, renames it or changes its description, shows it in the Finder or deletes it.
 
 The knobs are grouped as the process runs: Film, Exposure, Lens, Grain, Edge Effects
-(switched on and off at its heading), Print, Reproduction and Simulation. Clicking a
+(switched on and off at its heading), Print, Reproduction and Simulation. Auto exposure
+and the display value it places the median at share a row. Clicking a
 heading opens or closes it. A setting off its default underlines its name under the
 pointer, and clicking the name restores the default; double-clicking a slider does the
 same. A slider's value, shown to two decimals at most, can also be dragged or typed. Stock, Filter, Border and Finish are
