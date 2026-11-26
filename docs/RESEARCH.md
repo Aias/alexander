@@ -262,9 +262,12 @@ where a picture's tones bunch together. The limit holds working up from black an
 from white, so a picture whose light tenth already sits near white keeps paper white. And
 the light end is compressed toward white, which is where the book's pages are cleanest.
 
-A percentile within 0.005 of the one below it (on the black floor) or of white is left
-where it is. Near those limits it fades out over a short range instead of dropping: the
-curve is a blend of the curves with and without it. Dropping it outright would make the
+A percentile within 0.005 of white is held 0.005 below it, so the curve still bends
+toward the book's light tenth as far as the stretch limit allows. Without that knot the
+curve flattens into white and lifts a bright picture's light middle tones by as much as
+0.16. A percentile within 0.005 of the one below it (on the black floor, or held below
+white with it) is left where it is. Near that limit it fades out over a short range
+instead of dropping: the curve is a blend of the curves with and without it. Dropping it outright would make the
 whole picture jump, by as much as a fifth of the scale in the middle tones, whenever a
 setting carries a percentile across the limit.
 

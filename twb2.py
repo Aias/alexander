@@ -83,7 +83,7 @@ PAPER_CREAM = (0.957, 0.937, 0.882)   # display colour of the uncoated stock [tu
 HOUSE_PCT = (2, 10, 25, 90, 98)
 HOUSE_VAL = (0.08, 0.11, 0.22, 0.95, 1.00)
 HOUSE_MAX_SLOPE = 2.0        # the copy never stretched tones much; one matched pair measures 1.6
-HOUSE_KNOT_GAP = 0.005       # a percentile this close to the knot below it or to white is not a knot
+HOUSE_KNOT_GAP = 0.005       # knots closer than this to the knot below fade out, and none comes closer to white
 
 
 # ---------- colour and file handling -------------------------------------------
@@ -526,13 +526,15 @@ def copied_from_page(R, p, long_edge):
 def house_curve(own, strength):
     """The house-tone curve, display value in and out, for a picture whose display values
     at HOUSE_PCT are `own`. Each percentile is a knot moved toward the book's value
-    (`strength`, 0 to 1), unless it lies within HOUSE_KNOT_GAP of the knot below it (on the
-    black floor) or of white. Near those limits a knot fades out instead of dropping, the
-    curve being a blend of the curves with and without it, within half the gap either side
-    of the limit, so the curve never changes all at once. No part of the scale is stretched by more than HOUSE_MAX_SLOPE, working up
-    from black and down from white, so grain is not blown up where a picture's tones bunch
-    together and white stays white."""
-    want = (1.0 - strength) * np.asarray(own, dtype=float) + strength * np.array(HOUSE_VAL)
+    (`strength`, 0 to 1). A percentile within HOUSE_KNOT_GAP of white is held that far below
+    it, so a knot never meets white. One within HOUSE_KNOT_GAP of the knot below it (on the
+    black floor, or held below white with it) fades out instead of dropping, the curve being
+    a blend of the curves with and without it, within half the gap either side of the limit,
+    so the curve never changes all at once. No part of the scale is stretched by more than
+    HOUSE_MAX_SLOPE, working up from black and down from white, so grain is not blown up
+    where a picture's tones bunch together and white stays white."""
+    own = np.minimum(np.asarray(own, dtype=float), 1.0 - HOUSE_KNOT_GAP)
+    want = (1.0 - strength) * own + strength * np.array(HOUSE_VAL)
 
     def fade(d, lo, hi):
         t = min(max((d - lo) / (hi - lo), 0.0), 1.0)
@@ -553,7 +555,7 @@ def house_curve(own, strength):
             curves.append((weight, PchipInterpolator(xs, ys)))
             return
         below = own[kept[-1]] if kept else 0.0
-        p = fade(own[i] - below, 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP) * fade(1.0 - own[i], 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP)
+        p = fade(own[i] - below, 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP)
         choose(i + 1, kept + [i], weight * p)
         choose(i + 1, kept, weight * (1.0 - p))
 

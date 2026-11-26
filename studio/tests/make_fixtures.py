@@ -47,7 +47,7 @@ d["misc"]["tau_2.1_1.6"] = twb2.range_tau(twb2.print_range(3.0), 1.6)
 d["misc"]["tau_2.1_1.2"] = twb2.range_tau(twb2.print_range(3.0), 1.2)
 d["misc"]["tau_near"] = twb2.range_tau(twb2.print_range(3.0), twb2.print_range(3.0) - 1e-3)
 # house curve: for given own percentiles, the curve's display value out at sample inputs,
-# including percentiles part way into the fade at the black floor and at white
+# including percentiles part way into the fade at the black floor and near white
 cases = []
 for own in ([0.085, 0.094, 0.145, 0.93, 0.96], [0.09, 0.2, 0.38, 0.8, 0.9], [0.086, 0.0861, 0.12, 0.9999, 1.0],
             [0.082, 0.0864, 0.17, 0.9930, 0.9960], [0.08, 0.11, 0.3, 0.985, 0.991]):

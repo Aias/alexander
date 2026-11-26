@@ -177,6 +177,7 @@ pub fn house_lut(own: &[f64; 5], strength: f64) -> Vec<f32> {
         let t = ((d - lo) / (hi - lo)).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
     };
+    let own = own.map(|o| o.min(1.0 - HOUSE_KNOT_GAP));
     let mut out = vec![0.0f64; HOUSE_LUT_N];
     let mut choices = vec![(0usize, Vec::<usize>::new(), 1.0f64)];
     while let Some((i, kept, weight)) = choices.pop() {
@@ -198,7 +199,7 @@ pub fn house_lut(own: &[f64; 5], strength: f64) -> Vec<f32> {
             continue;
         }
         let below = kept.last().map_or(0.0, |&k| own[k]);
-        let p = fade(own[i] - below, 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP) * fade(1.0 - own[i], 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP);
+        let p = fade(own[i] - below, 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP);
         let mut with = kept.clone();
         with.push(i);
         choices.push((i + 1, with, weight * p));
