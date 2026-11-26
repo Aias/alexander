@@ -313,7 +313,7 @@ fn kernel_response(sigma: f64, f: f64) -> f64 {
 
 /// Transfer function exp(-ln 2 (f / f50)^n) of `blur_shaped`: n = 2 is the Gaussian of that sigma.
 fn shaped_response(sigma: f64, n: f64, f: f64) -> f64 {
-    if sigma < 0.15 {
+    if sigma <= 0.0 {
         return 1.0;
     }
     let f50 = (2f64.ln() / (2.0 * std::f64::consts::PI.powi(2))).sqrt() / sigma;
@@ -327,7 +327,8 @@ fn shaped_response(sigma: f64, n: f64, f: f64) -> f64 {
 /// copies of the picture at almost no cost.
 pub fn soften(lens: f64, n_lens: f64, emul: f64, n_emul: f64, max_sigma: f64) -> Mixture {
     let gauss = |n: f64| (n - 2.0).abs() < 1e-6;
-    let (lens, emul) = (if lens < 0.15 { 0.0 } else { lens }, if emul < 0.15 { 0.0 } else { emul });
+    let cut = |s: f64, n: f64| if gauss(n) && s < 0.15 { 0.0 } else { s.max(0.0) };
+    let (lens, emul) = (cut(lens, n_lens), cut(emul, n_emul));
     // the Gaussian part, applied to every component
     let mut g2 = 0.0;
     if gauss(n_lens) {

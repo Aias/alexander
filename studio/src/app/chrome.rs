@@ -63,7 +63,7 @@ impl App {
                 Mode::Grid | Mode::Survey => {
                     if self.mode == Mode::Grid {
                         let mut size = self.thumb_pt as f64;
-                        controls::slider(ui, &mut size, 80.0..=480.0, 110.0).on_hover_text("⌘+ / ⌘−");
+                        controls::slider(ui, &mut size, 80.0..=480.0, 110.0, false).on_hover_text("⌘+ / ⌘−");
                         self.thumb_pt = size as f32;
                         ui.add_space(8.0);
                     }

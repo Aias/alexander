@@ -56,6 +56,8 @@ fn paper_and_print() {
     let range = Paper::new(3.0).range;
     close("tau 1.6", compress_tau(range, 1.6).unwrap(), fx["misc"]["tau_2.1_1.6"].as_f64().unwrap(), 1e-9);
     close("tau 1.2", compress_tau(range, 1.2).unwrap(), fx["misc"]["tau_2.1_1.2"].as_f64().unwrap(), 1e-9);
+    let near = fx["misc"]["tau_near"].as_f64().unwrap();
+    close("tau near the range", compress_tau(range, range - 1e-3).unwrap(), near, 1e-9 * near);
 }
 
 #[test]

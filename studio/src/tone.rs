@@ -15,6 +15,7 @@ pub const PAPER_CREAM: [f64; 3] = [0.957, 0.937, 0.882];
 pub const HOUSE_PCT: [f64; 5] = [2.0, 10.0, 25.0, 90.0, 98.0];
 pub const HOUSE_VAL: [f64; 5] = [0.08, 0.11, 0.22, 0.95, 1.00];
 pub const HOUSE_MAX_SLOPE: f64 = 2.0;
+pub const HOUSE_KNOT_GAP: f64 = 0.005;
 
 pub fn srgb_to_lin(x: f64) -> f64 {
     if x <= 0.04045 {
@@ -88,16 +89,17 @@ impl Paper {
     }
 }
 
-/// tau of `compress_range`: t = d_out (1 - e^(-d/tau)) / (1 - e^(-d_in/tau)). None when no compression is needed.
+/// tau of `compress_range`: t = d_out (1 - e^(-d/tau)) / (1 - e^(-d_in/tau)). None when no
+/// compression is needed; it grows without bound as d_out nears d_in.
 pub fn compress_tau(d_in_max: f64, d_out_max: f64) -> Option<f64> {
     if d_out_max >= d_in_max {
         return None;
     }
-    let (mut lo, mut hi) = (0.05f64, 50.0f64);
+    let (mut lo, mut hi) = (0.05f64, 1e6f64);
     let mut tau = 1.0;
-    for _ in 0..60 {
+    for _ in 0..100 {
         tau = 0.5 * (lo + hi);
-        if tau * (1.0 - (-d_in_max / tau).exp()) < d_out_max {
+        if -tau * (-d_in_max / tau).exp_m1() < d_out_max {
             lo = tau;
         } else {
             hi = tau;
@@ -168,30 +170,41 @@ impl Pchip {
 pub const HOUSE_LUT_N: usize = 2048;
 
 /// The house-tone curve as a table: display value of the print in, linear reflectance out.
-/// `own` holds the print's display values at `HOUSE_PCT`.
+/// `own` holds the print's display values at `HOUSE_PCT`. As `house_curve` in twb2.py: a
+/// blend, over each choice of the percentiles kept as knots, of the curve through them.
 pub fn house_lut(own: &[f64; 5], strength: f64) -> Vec<f32> {
-    let mut xs = vec![0.0f64];
-    let mut ys = vec![0.0f64];
-    for i in 0..5 {
-        let want = (1.0 - strength) * own[i] + strength * HOUSE_VAL[i];
-        if own[i] - xs[xs.len() - 1] > 0.005 && own[i] < 0.995 {
-            xs.push(own[i]);
-            ys.push(want);
+    let fade = |d: f64, lo: f64, hi: f64| {
+        let t = ((d - lo) / (hi - lo)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let mut out = vec![0.0f64; HOUSE_LUT_N];
+    let mut choices = vec![(0usize, Vec::<usize>::new(), 1.0f64)];
+    while let Some((i, kept, weight)) = choices.pop() {
+        if weight <= 0.0 {
+            continue;
         }
+        if i == own.len() {
+            let xs: Vec<f64> = std::iter::once(0.0).chain(kept.iter().map(|&k| own[k])).chain([1.0]).collect();
+            let mut ys: Vec<f64> = std::iter::once(0.0).chain(kept.iter().map(|&k| (1.0 - strength) * own[k] + strength * HOUSE_VAL[k])).chain([1.0]).collect();
+            for j in 1..xs.len() {
+                ys[j] = ys[j].max(1.0 - HOUSE_MAX_SLOPE * (1.0 - xs[j]));
+                ys[j] = ys[j].min(ys[j - 1] + HOUSE_MAX_SLOPE * (xs[j] - xs[j - 1]));
+                ys[j] = ys[j].max(ys[j - 1] + 1e-4);
+            }
+            let p = Pchip::new(&xs, &ys);
+            for (n, o) in out.iter_mut().enumerate() {
+                *o += weight * p.eval(n as f64 / (HOUSE_LUT_N - 1) as f64);
+            }
+            continue;
+        }
+        let below = kept.last().map_or(0.0, |&k| own[k]);
+        let p = fade(own[i] - below, 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP) * fade(1.0 - own[i], 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP);
+        let mut with = kept.clone();
+        with.push(i);
+        choices.push((i + 1, with, weight * p));
+        choices.push((i + 1, kept, weight * (1.0 - p)));
     }
-    xs.push(1.0);
-    ys.push(1.0);
-    for i in 1..xs.len() {
-        ys[i] = ys[i].min(ys[i - 1] + HOUSE_MAX_SLOPE * (xs[i] - xs[i - 1]));
-        ys[i] = ys[i].max(ys[i - 1] + 1e-4);
-    }
-    let p = Pchip::new(&xs, &ys);
-    (0..HOUSE_LUT_N)
-        .map(|i| {
-            let v = i as f64 / (HOUSE_LUT_N - 1) as f64;
-            srgb_to_lin(p.eval(v).clamp(0.0, 1.0)) as f32
-        })
-        .collect()
+    out.iter().map(|&v| srgb_to_lin(v.clamp(0.0, 1.0)) as f32).collect()
 }
 
 /// A table that leaves tones alone (display value in, linear reflectance out).

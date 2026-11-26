@@ -134,11 +134,13 @@ fn footer(ui: &mut Ui, processed: bool, can_paste: bool, actions: &mut Vec<Comma
 
 /// A slider without its value: a thin rail and a small handle. Dragging the handle moves
 /// it from where it was taken; pressing the rail elsewhere puts it there.
-pub fn slider(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, width: f32) -> egui::Response {
+pub fn slider(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, width: f32, log: bool) -> egui::Response {
     let (lo, hi) = (*range.start(), *range.end());
+    let t_of = |v: f64| (if log { (v / lo).ln() / (hi / lo).ln() } else { (v - lo) / (hi - lo) }).clamp(0.0, 1.0);
+    let v_of = |t: f64| if log { lo * (hi / lo).powf(t) } else { lo + (hi - lo) * t };
     let (rect, mut r) = ui.allocate_exact_size(vec2(width.max(40.0), ui.spacing().interact_size.y), Sense::click_and_drag());
     let rail = rect.x_range().shrink(HANDLE_R + 1.0);
-    let x_of = |v: f64| rail.min + rail.span() * ((v - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
+    let x_of = |v: f64| rail.min + rail.span() * t_of(v) as f32;
     if let Some(p) = r.interact_pointer_pos().filter(|_| r.is_pointer_button_down_on()) {
         let grip = ui.data_mut(|d| {
             *d.get_temp_mut_or_insert_with(r.id, || {
@@ -146,7 +148,7 @@ pub fn slider(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, width: f32) 
                 if dx.abs() <= HANDLE_R + 3.0 { dx } else { 0.0 }
             })
         });
-        let nv = lo + (hi - lo) * ((p.x + grip - rail.min) / rail.span()).clamp(0.0, 1.0) as f64;
+        let nv = v_of(((p.x + grip - rail.min) / rail.span()).clamp(0.0, 1.0) as f64);
         if nv != *v {
             *v = nv;
             r.mark_changed();
@@ -158,7 +160,7 @@ pub fn slider(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, width: f32) 
         ui.memory_mut(|m| m.set_focus_lock_filter(r.id, EventFilter { horizontal_arrows: true, ..Default::default() }));
         let steps = ui.input(|i| i.num_presses(Key::ArrowRight) as f64 - i.num_presses(Key::ArrowLeft) as f64);
         if steps != 0.0 {
-            *v = (*v + steps * (hi - lo) / 100.0).clamp(lo, hi);
+            *v = v_of((t_of(*v) + steps / 100.0).clamp(0.0, 1.0));
             r.mark_changed();
         }
     }
@@ -195,13 +197,21 @@ pub(super) fn knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: Rang
         if name(ui, label, tip, *v != default) {
             *v = default;
         }
-        dial(ui, v, range, default, decimals);
+        dial(ui, v, range, default, decimals, false);
     });
 }
-fn dial(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize) {
+fn log_knob(ui: &mut Ui, label: &str, tip: &str, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize) {
+    ui.horizontal(|ui| {
+        if name(ui, label, tip, *v != default) {
+            *v = default;
+        }
+        dial(ui, v, range, default, decimals, true);
+    });
+}
+fn dial(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, default: f64, decimals: usize, log: bool) {
     let speed = (range.end() - range.start()) / 300.0;
     let w = ui.available_width() - VALUE_W - ui.spacing().item_spacing.x;
-    let r = slider(ui, v, range, w);
+    let r = slider(ui, v, range, w, log);
     ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     ui.spacing_mut().button_padding.x = 2.0;
     ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).custom_formatter(|v, _| format!("{v:.decimals$}")));
@@ -288,7 +298,10 @@ fn knobs(ui: &mut Ui, s: &mut Settings, bordered: bool) {
         };
         toggles(ui, "Stock", "", &mut s.film, d.film, &FilmKind::ALL.map(|k| (k, stock(k), k.label())));
         toggles(ui, "Filter", "", &mut s.filter, d.filter, &[(Filter::None, "None", ""), (Filter::Yellow, "Yellow", ""), (Filter::Orange, "Orange", ""), (Filter::Red, "Red", "")]);
-        knob(ui, "Size", "Long edge of film the picture fills, mm. 36 is a full 35mm frame", &mut s.film_mm, 8.0..=72.0, d.film_mm, 1);
+        log_knob(ui, "Size", "Long edge of film the picture fills, mm. 36 is a full 35mm frame", &mut s.film_mm, 8.0..=72.0, d.film_mm, 1);
+        let mut grid = s.detail_px as f64;
+        knob(ui, "Grid", "Long edge of the simulation grid, px. With Size, it sets how large the grain is in the frame. 0 is the photo's own size", &mut grid, 0.0..=8192.0, d.detail_px as f64, 0);
+        s.detail_px = ((grid / 32.0).round() * 32.0).clamp(0.0, 16384.0) as u32;
         let mut kind = match s.dev {
             None => 0,
             Some(Dev::Minutes(_)) => 1,
@@ -310,7 +323,9 @@ fn knobs(ui: &mut Ui, s: &mut Settings, bordered: bool) {
         }
         if let Some(Dev::Minutes(m)) = &mut s.dev {
             let def = if s.film == FilmKind::DoubleX { 6.0 } else { 7.0 };
-            knob(ui, "Minutes", "Longer is more contrast", m, 3.0..=14.0, def, 1);
+            let range = s.film.dev_range();
+            *m = m.clamp(*range.start(), *range.end());
+            knob(ui, "Minutes", "Longer is more contrast", m, range, def, 1);
         }
     });
     section(ui, "Exposure", true, None, |ui| {
@@ -319,7 +334,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings, bordered: bool) {
                 (s.auto_ev, s.auto_ev_target) = (d.auto_ev, d.auto_ev_target);
             }
             ui.add(egui::Checkbox::without_text(&mut s.auto_ev));
-            ui.add_enabled_ui(s.auto_ev, |ui| dial(ui, &mut s.auto_ev_target, 0.2..=0.7, d.auto_ev_target, 2));
+            ui.add_enabled_ui(s.auto_ev, |ui| dial(ui, &mut s.auto_ev_target, 0.2..=0.7, d.auto_ev_target, 2, false));
         });
         knob(ui, "Exposure", "Stops", &mut s.ev, -3.0..=3.0, d.ev, 2);
         if bordered {
@@ -370,7 +385,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings, bordered: bool) {
                     knob(ui, "PPI", "", &mut s.ppi, 72.0..=600.0, d.ppi, 0);
                 } else {
                     let mut mm = s.page_mm.unwrap_or(200.0);
-                    knob(ui, "Page size", "Long edge on the page, mm", &mut mm, 30.0..=400.0, 200.0, 0);
+                    log_knob(ui, "Page size", "Long edge on the page, mm", &mut mm, 30.0..=400.0, 200.0, 0);
                     s.page_mm = Some(mm);
                 }
                 knob(ui, "Screen", "Lines per inch", &mut s.lpi, 65.0..=200.0, d.lpi, 0);
@@ -390,10 +405,5 @@ fn knobs(ui: &mut Ui, s: &mut Settings, bordered: bool) {
                 }
             }
         }
-    });
-    section(ui, "Simulation", false, None, |ui| {
-        let mut grid = s.detail_px as f64;
-        knob(ui, "Grid", "Long edge of the simulation grid, px. 0 is the photo's own size", &mut grid, 0.0..=8192.0, d.detail_px as f64, 0);
-        s.detail_px = ((grid / 32.0).round() * 32.0).clamp(0.0, 16384.0) as u32;
     });
 }

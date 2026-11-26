@@ -43,29 +43,17 @@ for grade in (3.0, 2.55, 0.9, 4.25):
     ref = 0.681
     offset = float(np.interp(dmin + 0.745, py, px)) + ref + (-0.5) * math.log10(2.0)
     d["paper"][str(grade)] = {"curve_every_30": [float(v) for v in py[::30]], "dmin": dmin, "range": twb2.print_range(grade), "offset_ref0681": offset}
-def tau(d_in, d_out):
-    lo, hi = 0.05, 50.0
-    for _ in range(60):
-        t = 0.5 * (lo + hi)
-        lo, hi = (t, hi) if t * (1 - math.exp(-d_in / t)) < d_out else (lo, t)
-    return t
-d["misc"]["tau_2.1_1.6"] = tau(twb2.print_range(3.0), 1.6)
-d["misc"]["tau_2.1_1.2"] = tau(twb2.print_range(3.0), 1.2)
-# house curve: for given own percentiles, the curve's display value out at sample inputs
-from scipy.interpolate import PchipInterpolator
+d["misc"]["tau_2.1_1.6"] = twb2.range_tau(twb2.print_range(3.0), 1.6)
+d["misc"]["tau_2.1_1.2"] = twb2.range_tau(twb2.print_range(3.0), 1.2)
+d["misc"]["tau_near"] = twb2.range_tau(twb2.print_range(3.0), twb2.print_range(3.0) - 1e-3)
+# house curve: for given own percentiles, the curve's display value out at sample inputs,
+# including percentiles part way into the fade at the black floor and at white
 cases = []
-for own in ([0.085, 0.094, 0.145, 0.93, 0.96], [0.09, 0.2, 0.38, 0.8, 0.9], [0.086, 0.0861, 0.12, 0.9999, 1.0]):
+for own in ([0.085, 0.094, 0.145, 0.93, 0.96], [0.09, 0.2, 0.38, 0.8, 0.9], [0.086, 0.0861, 0.12, 0.9999, 1.0],
+            [0.082, 0.0864, 0.17, 0.9930, 0.9960], [0.08, 0.11, 0.3, 0.985, 0.991]):
     for strength in (1.0, 0.5):
-        want = (1 - strength) * np.array(own) + strength * np.array(twb2.HOUSE_VAL)
-        xs, ys = [0.0], [0.0]
-        for x, y in zip(own, want):
-            if x - xs[-1] > 0.005 and x < 0.995:
-                xs.append(float(x)); ys.append(float(y))
-        xs.append(1.0); ys.append(1.0)
-        for i in range(1, len(xs)):
-            ys[i] = min(ys[i], ys[i - 1] + twb2.HOUSE_MAX_SLOPE * (xs[i] - xs[i - 1])); ys[i] = max(ys[i], ys[i - 1] + 1e-4)
         v = np.linspace(0, 1, 41)
-        cases.append({"own": own, "strength": strength, "out": [float(t) for t in np.clip(PchipInterpolator(xs, ys)(v), 0, 1)]})
+        cases.append({"own": own, "strength": strength, "out": [float(t) for t in np.clip(twb2.house_curve(own, strength)(v), 0, 1)]})
 d["misc"]["house"] = cases
 json.dump(d, open(os.path.join(OUT, "derived.json"), "w"), indent=1)
 

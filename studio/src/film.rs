@@ -36,6 +36,17 @@ impl FilmKind {
             FilmKind::DoubleX => "Double-X 5222",
         }
     }
+    pub fn dev_range(self) -> std::ops::RangeInclusive<f64> {
+        static RANGES: std::sync::OnceLock<[(f64, f64); 3]> = std::sync::OnceLock::new();
+        let ranges = RANGES.get_or_init(|| {
+            FilmKind::ALL.map(|k| {
+                let t = Film::load(k).dev_times();
+                (t[0], t[t.len() - 1])
+            })
+        });
+        let (lo, hi) = ranges[FilmKind::ALL.iter().position(|&k| k == self).unwrap_or(0)];
+        lo..=hi
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

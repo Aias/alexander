@@ -296,7 +296,14 @@ fn compress(d: f32) -> f32 {
     if (tau <= 0.0) {
         return d;
     }
-    return u.v[1].y * (1.0 - exp(-d / tau)) / (1.0 - exp(-u.v[1].x / tau));
+    return u.v[1].y * one_minus_exp(d / tau) / one_minus_exp(u.v[1].x / tau);
+}
+
+fn one_minus_exp(x: f32) -> f32 {
+    if (x < 1e-2) {
+        return x * (1.0 - x * (0.5 - x / 6.0));
+    }
+    return 1.0 - exp(-x);
 }
 
 fn printed_once(t_in: f32) -> f32 {

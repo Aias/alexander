@@ -155,7 +155,8 @@ in the app's data folder under `Presets`; right-clicking one of these updates it
 current look, renames it or changes its description, shows it in the Finder or deletes it.
 
 The knobs are grouped as the process runs: Film, Exposure, Lens, Grain, Edge Effects
-(switched on and off at its heading), Print, Reproduction and Simulation. Auto exposure
+(switched on and off at its heading), Print and Reproduction. Film holds the simulation grid
+beside Size, since the two together set how large the grain is in the frame. Auto exposure
 and the display value it places the median at share a row. Clicking a
 heading opens or closes it. A setting off its default underlines its name under the
 pointer, and clicking the name restores the default; double-clicking a slider does the

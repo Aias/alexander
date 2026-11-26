@@ -83,6 +83,7 @@ PAPER_CREAM = (0.957, 0.937, 0.882)   # display colour of the uncoated stock [tu
 HOUSE_PCT = (2, 10, 25, 90, 98)
 HOUSE_VAL = (0.08, 0.11, 0.22, 0.95, 1.00)
 HOUSE_MAX_SLOPE = 2.0        # the copy never stretched tones much; one matched pair measures 1.6
+HOUSE_KNOT_GAP = 0.005       # a percentile this close to the knot below it or to white is not a knot
 
 
 # ---------- colour and file handling -------------------------------------------
@@ -223,10 +224,10 @@ def blur_shaped(x, sigma_px, exponent):
     of the given sigma. A lower n keeps the frequency of half response and changes the
     shape: a sharp core with a long, faint skirt. Published film sharpness curves fall off
     with n near 1.15."""
-    if sigma_px < 0.15:
-        return x
     if abs(exponent - 2.0) < 1e-6:
         return blur(x, sigma_px)
+    if sigma_px <= 0:
+        return x
     pad = int(min(min(x.shape) - 1, math.ceil(40 * sigma_px) + 16))   # the skirt reaches far
     xp = np.pad(x, pad, mode="reflect")
     f = np.hypot(np.fft.fftfreq(xp.shape[0])[:, None], np.fft.rfftfreq(xp.shape[1])[None, :])
@@ -462,16 +463,23 @@ def print_range(grade):
     return float(py.max() - py.min())
 
 
+def range_tau(d_in_max, d_out_max):
+    """tau of `compress_range`, solving tau (1 - e^(-d_in_max/tau)) = d_out_max. It grows
+    without bound as d_out_max nears d_in_max, where the map nears the identity."""
+    lo, hi = 0.05, 1e6
+    for _ in range(100):
+        tau = 0.5 * (lo + hi)
+        lo, hi = (tau, hi) if -tau * math.expm1(-d_in_max / tau) < d_out_max else (lo, tau)
+    return tau
+
+
 def compress_range(d, d_in_max, d_out_max):
     """Map density 0..d_in_max onto 0..d_out_max with slope 1 at the highlight end and a
     smooth roll-off toward the shadows: t = d_out_max (1 - e^(-d/tau)) / (1 - e^(-d_in_max/tau))."""
     if d_out_max >= d_in_max:
         return d
-    lo, hi = 0.05, 50.0                    # solve tau (1 - e^(-d_in_max/tau)) = d_out_max
-    for _ in range(60):
-        tau = 0.5 * (lo + hi)
-        lo, hi = (tau, hi) if tau * (1 - math.exp(-d_in_max / tau)) < d_out_max else (lo, tau)
-    return (d_out_max * (1 - np.exp(-d / tau)) / (1 - math.exp(-d_in_max / tau))).astype(F)
+    tau = range_tau(d_in_max, d_out_max)
+    return (d_out_max * np.expm1(-d / tau) / math.expm1(-d_in_max / tau)).astype(F)
 
 
 def smoothstep(lo, hi, x):
@@ -515,14 +523,49 @@ def copied_from_page(R, p, long_edge):
     return (1.0 - t * (1.0 - black)).astype(F)
 
 
+def house_curve(own, strength):
+    """The house-tone curve, display value in and out, for a picture whose display values
+    at HOUSE_PCT are `own`. Each percentile is a knot moved toward the book's value
+    (`strength`, 0 to 1), unless it lies within HOUSE_KNOT_GAP of the knot below it (on the
+    black floor) or of white. Near those limits a knot fades out instead of dropping, the
+    curve being a blend of the curves with and without it, within half the gap either side
+    of the limit, so the curve never changes all at once. No part of the scale is stretched by more than HOUSE_MAX_SLOPE, working up
+    from black and down from white, so grain is not blown up where a picture's tones bunch
+    together and white stays white."""
+    want = (1.0 - strength) * np.asarray(own, dtype=float) + strength * np.array(HOUSE_VAL)
+
+    def fade(d, lo, hi):
+        t = min(max((d - lo) / (hi - lo), 0.0), 1.0)
+        return t * t * (3.0 - 2.0 * t)
+
+    curves = []
+
+    def choose(i, kept, weight):
+        if weight <= 0.0:
+            return
+        if i == len(own):
+            xs = [0.0] + [float(own[k]) for k in kept] + [1.0]
+            ys = [0.0] + [float(want[k]) for k in kept] + [1.0]
+            for j in range(1, len(xs)):
+                ys[j] = max(ys[j], 1.0 - HOUSE_MAX_SLOPE * (1.0 - xs[j]))
+                ys[j] = min(ys[j], ys[j - 1] + HOUSE_MAX_SLOPE * (xs[j] - xs[j - 1]))
+                ys[j] = max(ys[j], ys[j - 1] + 1e-4)
+            curves.append((weight, PchipInterpolator(xs, ys)))
+            return
+        below = own[kept[-1]] if kept else 0.0
+        p = fade(own[i] - below, 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP) * fade(1.0 - own[i], 0.5 * HOUSE_KNOT_GAP, 1.5 * HOUSE_KNOT_GAP)
+        choose(i + 1, kept + [i], weight * p)
+        choose(i + 1, kept, weight * (1.0 - p))
+
+    choose(0, [], 1.0)
+    return lambda v: sum(w * c(v) for w, c in curves)
+
+
 def house_tones(R, strength, area=None):
     """Pull a picture's tones toward the range the book's pages share. The book's makers
     copied every source to a common look: shadows opened to a set level and the lightest
     tones taken to paper white. The picture's own percentiles are moved toward the book's
-    (`strength`, 0 to 1) along a smooth curve that keeps their order. No part of the scale
-    is stretched by more than HOUSE_MAX_SLOPE, so grain is not blown up where a picture's
-    tones bunch together, and the light end is compressed toward white, where the book's
-    pages are cleanest. With `area` the percentiles are read inside the picture area only,
+    along `house_curve`. With `area` the percentiles are read inside the picture area only,
     so a border does not count as the picture's own tones."""
     v = lin_to_srgb(np.clip(R, 0.0, 1.0))
     if area:
@@ -531,16 +574,7 @@ def house_tones(R, strength, area=None):
         own = np.percentile(v[-(-y0 // 3) * 3:y1:3, -(-x0 // 3) * 3:x1:3], HOUSE_PCT)
     else:
         own = np.percentile(v[::3, ::3], HOUSE_PCT)
-    want = (1.0 - strength) * own + strength * np.array(HOUSE_VAL)
-    xs, ys = [0.0], [0.0]
-    for x, y in zip(own, want):
-        if x - xs[-1] > 0.005 and x < 0.995:             # skip percentiles sitting on the black floor or on white
-            xs.append(float(x)); ys.append(float(y))
-    xs.append(1.0); ys.append(1.0)
-    for i in range(1, len(xs)):                          # limit the stretch, working up from black
-        ys[i] = min(ys[i], ys[i - 1] + HOUSE_MAX_SLOPE * (xs[i] - xs[i - 1]))
-        ys[i] = max(ys[i], ys[i - 1] + 1e-4)
-    return srgb_to_lin(np.clip(PchipInterpolator(xs, ys)(v), 0.0, 1.0)).astype(F)
+    return srgb_to_lin(np.clip(house_curve(own, strength)(v), 0.0, 1.0)).astype(F)
 
 
 def halftone_on_page(R, p, mm):

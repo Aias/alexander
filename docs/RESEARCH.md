@@ -258,8 +258,15 @@ the picture, because the book's pages differ widely there.
 
 Two limits keep the step from doing harm. No part of the scale is stretched by more than
 a factor of 2 (one matched pair measures the 1979 copy at 1.6), so grain is not blown up
-where a picture's tones bunch together. And the light end is compressed toward white,
-which is where the book's pages are cleanest.
+where a picture's tones bunch together. The limit holds working up from black and down
+from white, so a picture whose light tenth already sits near white keeps paper white. And
+the light end is compressed toward white, which is where the book's pages are cleanest.
+
+A percentile within 0.005 of the one below it (on the black floor) or of white is left
+where it is. Near those limits it fades out over a short range instead of dropping: the
+curve is a blend of the curves with and without it. Dropping it outright would make the
+whole picture jump, by as much as a fifth of the scale in the middle tones, whenever a
+setting carries a percentile across the limit.
 
 The two shadow targets are set at the lower quartile across the book's pages (0.11 and
 0.22) where the medians are 0.12 and 0.24. With the medians, buildings lost a little
