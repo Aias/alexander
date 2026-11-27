@@ -4,7 +4,7 @@ use super::{App, Command, Compare, Mode};
 use alexander_studio::engine::Canvas;
 use alexander_studio::library::{Id, Item, Status};
 use egui::text::{LayoutJob, TextWrapping};
-use egui::{pos2, vec2, Align2, Button, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
+use egui::{pos2, vec2, Align2, Button, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Key, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 
 pub const VIEW_BG: Color32 = Color32::from_gray(22);
 pub const BAR: Color32 = Color32::from_gray(29);
@@ -107,15 +107,15 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
     .response
 }
 
-fn px(r: Rect, ppp: f32) -> [i32; 4] {
+pub fn px(r: Rect, ppp: f32) -> [i32; 4] {
     [(r.min.x * ppp).round() as i32, (r.min.y * ppp).round() as i32, (r.max.x * ppp).round() as i32, (r.max.y * ppp).round() as i32]
 }
 
-fn from_px(p: [i32; 4], ppp: f32) -> Rect {
+pub fn from_px(p: [i32; 4], ppp: f32) -> Rect {
     Rect::from_min_max(pos2(p[0] as f32 / ppp, p[1] as f32 / ppp), pos2(p[2] as f32 / ppp, p[3] as f32 / ppp))
 }
 
-fn uv() -> Rect {
+pub fn uv() -> Rect {
     Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))
 }
 
@@ -554,15 +554,19 @@ impl App {
             self.crop_view(ui, rect);
             return;
         }
+        let slides = self.zoom.is_none() && ui.input(|i| i.key_down(Key::Space));
+        if slides && resp.dragged() {
+            self.slide(id, resp.drag_delta() * (ppp / self.last_fit));
+        }
         let Some(item) = self.lib.get(id) else { return };
         if !item.ready() {
             return;
         }
         if resp.hovered() {
             ui.ctx().set_cursor_icon(match self.zoom {
-                None => CursorIcon::ZoomIn,
-                Some(_) if resp.dragged() => CursorIcon::Grabbing,
-                Some(_) => CursorIcon::Grab,
+                None if !slides || item.crop().is_none() => CursorIcon::ZoomIn,
+                _ if resp.dragged() => CursorIcon::Grabbing,
+                _ => CursorIcon::Grab,
             });
         }
         let vp = px(rect, ppp);

@@ -1,8 +1,9 @@
-//! Cropping one photo in Detail: the whole photo shown turned by its angle under a level
-//! frame, which keeps an aspect unless set free and never leaves the photo. Dragging just
-//! outside a corner of the frame turns the photo under it.
+//! Cropping one photo in Detail: the photo shown turned by its angle under a level frame
+//! held at the middle of the view, which keeps an aspect unless set free and never leaves
+//! the photo. Dragging inside the frame slides the photo under it, a pinch sizes the photo
+//! under it, and dragging just outside a corner of the frame turns the photo under it.
 
-use super::views::{LABEL, TEXT};
+use super::views::{from_px, px, uv, LABEL, TEXT};
 use super::{controls, App, Mode};
 use alexander_studio::engine::Canvas;
 use alexander_studio::library::Id;
@@ -15,33 +16,52 @@ const WHOLE: Crop = Crop { left: 0.0, top: 0.0, right: 1.0, bottom: 1.0, angle: 
 /// Long side over short side for each aspect the frame can keep; None leaves it free.
 const ASPECTS: [(&str, Option<f64>); 6] = [("Original", Some(0.0)), ("1:1", Some(1.0)), ("4:5", Some(1.25)), ("3:2", Some(1.5)), ("16:9", Some(16.0 / 9.0)), ("Free", None)];
 
+/// The frame's handles, each by the sides it moves: -1 the left or top, 1 the right or bottom.
+const HANDLES: [(i32, i32); 8] = [(-1, -1), (1, -1), (-1, 1), (1, 1), (0, -1), (0, 1), (-1, 0), (1, 0)];
+
 #[derive(Clone)]
 pub struct CropEdit {
     pub id: Id,
     crop: Crop,
     /// A place in `ASPECTS`.
     aspect: usize,
+    /// The photo point at the middle of the view, in grid pixels, and the points a grid
+    /// pixel spans there: held while a handle is dragged, then easing to the frame. None
+    /// when the view follows the frame.
+    view: Option<(Pos2, f32)>,
 }
 
 impl CropEdit {
     /// Turn the photo `degrees` further under the frame, shrinking the frame to stay on a
     /// `grid` photo.
     pub fn turn(&mut self, degrees: f64, grid: (u32, u32)) {
-        self.crop.angle = (self.crop.angle + degrees).clamp(-45.0, 45.0);
-        self.crop = fit(self.crop, grid.0 as f64, grid.1 as f64);
+        self.crop = turned(self.crop, (self.crop.angle + degrees).clamp(-45.0, 45.0), grid.0 as f64, grid.1 as f64);
     }
 }
 
-/// Whether the frame of `c` lies inside a `w` × `h` photo turned under it, as the canvas
-/// pass turns it.
-fn fits(c: &Crop, w: f64, h: f64) -> bool {
+/// The point of a `w` × `h` photo under the middle of the frame of `c`, in the photo's own
+/// pixels, and half the width and height the frame spans there, the photo turned under it
+/// as the canvas pass turns it.
+fn placed(c: &Crop, w: f64, h: f64) -> ([f64; 2], [f64; 2]) {
     let (s, k) = c.angle.to_radians().sin_cos();
-    let (mx, my) = (w / 2.0, h / 2.0);
-    [(c.left, c.top), (c.right, c.top), (c.left, c.bottom), (c.right, c.bottom)].iter().all(|&(fx, fy)| {
-        let (dx, dy) = (fx * w - mx, fy * h - my);
-        let (px, py) = (mx + k * dx + s * dy, my + k * dy - s * dx);
-        (-1e-6..=w + 1e-6).contains(&px) && (-1e-6..=h + 1e-6).contains(&py)
-    })
+    let (dx, dy) = ((c.left + c.right - 1.0) * w / 2.0, (c.top + c.bottom - 1.0) * h / 2.0);
+    let (hw, hh) = ((c.right - c.left) * w / 2.0, (c.bottom - c.top) * h / 2.0);
+    ([w / 2.0 + k * dx + s * dy, h / 2.0 + k * dy - s * dx], [k.abs() * hw + s.abs() * hh, s.abs() * hw + k.abs() * hh])
+}
+
+/// The frame reaching `half` of the photo's width and height either side of its middle,
+/// which lies over the point `p` of a `w` × `h` photo turned `angle` degrees under it.
+fn over(p: [f64; 2], half: [f64; 2], angle: f64, w: f64, h: f64) -> Crop {
+    let (s, k) = angle.to_radians().sin_cos();
+    let (dx, dy) = (p[0] - w / 2.0, p[1] - h / 2.0);
+    let (cx, cy) = (0.5 + (k * dx - s * dy) / w, 0.5 + (s * dx + k * dy) / h);
+    Crop { left: cx - half[0], top: cy - half[1], right: cx + half[0], bottom: cy + half[1], angle }
+}
+
+/// Whether the frame of `c` lies inside a `w` × `h` photo turned under it.
+fn fits(c: &Crop, w: f64, h: f64) -> bool {
+    let (p, e) = placed(c, w, h);
+    p[0] - e[0] >= -1e-6 && p[0] + e[0] <= w + 1e-6 && p[1] - e[1] >= -1e-6 && p[1] + e[1] <= h + 1e-6
 }
 
 /// `c` made to fit: shrunk about its centre, or about the photo's when its centre is outside.
@@ -65,6 +85,30 @@ fn fit(c: Crop, w: f64, h: f64) -> Crop {
     at(lo, cx, cy)
 }
 
+/// `c` put on the photo: its frame shrunk until the photo has room for it, then moved the
+/// least that brings it inside.
+fn onto(c: Crop, w: f64, h: f64) -> Crop {
+    if fits(&c, w, h) {
+        return c;
+    }
+    let (p, e) = placed(&c, w, h);
+    let s = (w / 2.0 / e[0]).min(h / 2.0 / e[1]).min(1.0);
+    let p = [p[0].max(s * e[0]).min(w - s * e[0]), p[1].max(s * e[1]).min(h - s * e[1])];
+    over(p, [(c.right - c.left) / 2.0 * s, (c.bottom - c.top) / 2.0 * s], c.angle, w, h)
+}
+
+/// `c` with the photo turned to `angle` degrees about the point under the middle of the
+/// frame, the frame shrunk to stay on the photo.
+fn turned(c: Crop, angle: f64, w: f64, h: f64) -> Crop {
+    fit(over(placed(&c, w, h).0, [(c.right - c.left) / 2.0, (c.bottom - c.top) / 2.0], angle, w, h), w, h)
+}
+
+/// `c` with the photo slid `by` of its pixels under the frame, as far as it covers the frame.
+fn slid(c: Crop, by: Vec2, w: f64, h: f64) -> Crop {
+    let (dx, dy) = (by.x as f64 / w, by.y as f64 / h);
+    onto(Crop { left: c.left - dx, right: c.right - dx, top: c.top - dy, bottom: c.bottom - dy, ..c }, w, h)
+}
+
 impl App {
     /// The ratio of width to height the frame keeps, turned the way the frame is, if any.
     fn kept_ratio(&self, e: &CropEdit, w: f64, h: f64) -> Option<f64> {
@@ -76,7 +120,7 @@ impl App {
 
     pub(super) fn start_crop(&mut self) {
         let Some(item) = self.lib.focus.and_then(|f| self.lib.get(f)) else { return };
-        self.cropping = Some(CropEdit { id: item.id, crop: item.crop().unwrap_or(WHOLE), aspect: 0 });
+        self.cropping = Some(CropEdit { id: item.id, crop: item.crop().unwrap_or(WHOLE), aspect: 0, view: None });
         self.mode = Mode::Detail;
         self.zoom = None;
         self.panel = true;
@@ -89,6 +133,24 @@ impl App {
         look.crop = (e.crop != WHOLE).then_some(e.crop);
         self.lib.checkpoint(&[e.id]);
         self.lib.set_look(&[e.id], Some(look));
+    }
+
+    /// Slide photo `id` `by` grid pixels under its crop, the whole of a drag as one step
+    /// undo takes back.
+    pub(super) fn slide(&mut self, id: Id, by: Vec2) {
+        let Some(item) = self.lib.get(id) else { return };
+        let (Some(crop), Some(mut look)) = (item.crop(), item.look.clone()) else { return };
+        let (w, h) = self.tiers.grid_size(item);
+        let next = slid(crop, by, w as f64, h as f64);
+        if next == crop {
+            return;
+        }
+        look.crop = Some(next);
+        if !self.edit_open {
+            self.lib.checkpoint(&[id]);
+            self.edit_open = true;
+        }
+        self.lib.set_look(&[id], Some(look));
     }
 
     /// The panel while cropping: the frame's aspect, the photo's angle and the way out.
@@ -108,10 +170,10 @@ impl App {
                 e.crop = fit(Crop { top: cy - fh / 2.0, bottom: cy + fh / 2.0, left: cx - fw / w / 2.0, right: cx + fw / w / 2.0, ..e.crop }, w, h);
             }
         }
-        let before = e.crop.angle;
-        controls::knob(ui, "Straighten", "Degrees the photo turns clockwise under the frame", &mut e.crop.angle, -45.0..=45.0, 0.0, 1);
-        if e.crop.angle != before {
-            e.crop = fit(e.crop, w, h);
+        let mut angle = e.crop.angle;
+        controls::knob(ui, "Straighten", "Degrees the photo turns clockwise under the frame", &mut angle, -45.0..=45.0, 0.0, 1);
+        if angle != e.crop.angle {
+            e.crop = turned(e.crop, angle, w, h);
         }
         ui.add_space(10.0);
         ui.horizontal(|ui| {
@@ -131,26 +193,36 @@ impl App {
         });
     }
 
-    /// Detail while cropping: the whole photo turned under the frame, and the frame with
-    /// its handles.
+    /// Detail while cropping: the frame with its handles at the middle of the view, as large
+    /// as fits, and the photo turned under it.
     pub(super) fn crop_view(&mut self, ui: &mut Ui, rect: Rect) {
         let Some(mut e) = self.cropping.clone() else { return };
         let Some(item) = self.lib.get(e.id) else { return };
         let ppp = ui.ctx().pixels_per_point();
         let (gw, gh) = self.tiers.grid_size(item);
         let (w, h) = (gw as f32, gh as f32);
-        let (s, k) = (e.crop.angle.to_radians() as f32).sin_cos();
-        let (bw, bh) = (w * k.abs() + h * s.abs(), w * s.abs() + h * k.abs());
-        let origin = [(w - bw) / 2.0, (h - bh) / 2.0];
+        let (fw, fh) = (gw as f64, gh as f64);
         let area = rect.shrink(28.0);
-        let z = (area.width() / bw).min(area.height() / bh);
-        let img = Rect::from_center_size(area.center(), vec2(bw * z, bh * z));
-        let size = [(img.width() * ppp).round().max(1.0) as u32, (img.height() * ppp).round().max(1.0) as u32];
-        let canvas = Canvas { origin, scale: bw / size[0] as f32, source: Canvas::RENDER, clip: false, angle: e.crop.angle.to_radians() as f32 };
-        if let Some(t) = self.tiers.canvas(item, canvas, size, 0) {
-            ui.painter().image(t, img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        let span = vec2((e.crop.right - e.crop.left) as f32 * w, (e.crop.bottom - e.crop.top) as f32 * h);
+        let rest = (pos2((e.crop.left + e.crop.right) as f32 * w / 2.0, (e.crop.top + e.crop.bottom) as f32 * h / 2.0), (area.width() / span.x).min(area.height() / span.y));
+        let handle = |sx: i32, sy: i32| egui::Id::unique(("crop-handle", sx, sy));
+        if HANDLES.iter().any(|&(sx, sy)| ui.ctx().is_being_dragged(handle(sx, sy))) {
+            e.view.get_or_insert(rest);
+        } else if let Some((mid, z)) = e.view {
+            let k = 1.0 - (-ui.input(|i| i.stable_dt) / 0.06).exp();
+            let settled = ((rest.0 - mid) * z).length() < 0.5 && (rest.1 / z - 1.0).abs() < 1e-3;
+            e.view = (!settled).then_some((mid + (rest.0 - mid) * k, z + (rest.1 - z) * k));
+            ui.ctx().request_repaint();
         }
-        let to_screen = |x: f64, y: f64| pos2(img.min.x + (x as f32 * w - origin[0]) * z, img.min.y + (y as f32 * h - origin[1]) * z);
+        let (mid, z) = e.view.unwrap_or(rest);
+        let view = px(rect, ppp);
+        let shown = from_px(view, ppp);
+        let corner = mid + (shown.min - area.center()) / z;
+        let canvas = Canvas { origin: [corner.x, corner.y], scale: 1.0 / (z * ppp), source: Canvas::RENDER, clip: false, angle: e.crop.angle.to_radians() as f32 };
+        if let Some(t) = self.tiers.canvas(item, canvas, [(view[2] - view[0]).max(1) as u32, (view[3] - view[1]).max(1) as u32], 0) {
+            ui.painter().image(t, shown, uv(), Color32::WHITE);
+        }
+        let to_screen = |x: f64, y: f64| area.center() + (pos2(x as f32 * w, y as f32 * h) - mid) * z;
         let frame = Rect::from_min_max(to_screen(e.crop.left, e.crop.top), to_screen(e.crop.right, e.crop.bottom));
         let p = ui.painter().with_clip_rect(rect);
         let shade = Color32::from_black_alpha(150);
@@ -163,7 +235,6 @@ impl App {
             p.hline(frame.x_range(), frame.top() + frame.height() * t, Stroke::new(1.0f32, Color32::from_white_alpha(70)));
         }
         p.rect_stroke(frame, 0.0, Stroke::new(1.0f32, TEXT), StrokeKind::Outside);
-        let (fw, fh) = (w as f64, h as f64);
         let ratio = self.kept_ratio(&e, fw, fh);
         let corners = [frame.left_top(), frame.right_top(), frame.left_bottom(), frame.right_bottom()];
         let near = |p: Pos2| !frame.contains(p) && corners.iter().any(|c| c.distance(p) < 36.0);
@@ -185,18 +256,26 @@ impl App {
             self.cropping = Some(e);
             return;
         }
-        let mut moved = None;
+        let pinch = ui.input(|i| i.zoom_delta()) as f64;
+        if let Some(at) = ui.input(|i| i.pointer.hover_pos()).filter(|_| (pinch - 1.0).abs() > 1e-4 && ui.rect_contains_pointer(rect)) {
+            let under = mid + (at - area.center()) / z;
+            let (x, y) = ((under.x / w) as f64, (under.y / h) as f64);
+            let next = Crop { left: x + (e.crop.left - x) / pinch, top: y + (e.crop.top - y) / pinch, right: x + (e.crop.right - x) / pinch, bottom: y + (e.crop.bottom - y) / pinch, ..e.crop };
+            if next.right - next.left > 0.02 && next.bottom - next.top > 0.02 {
+                e.crop = onto(next, fw, fh);
+            }
+        }
         let inside = ui.interact(frame, egui::Id::unique("crop-frame"), Sense::drag());
         if inside.hovered() || inside.dragged() {
-            ui.ctx().set_cursor_icon(CursorIcon::Grab);
+            ui.ctx().set_cursor_icon(if inside.dragged() { CursorIcon::Grabbing } else { CursorIcon::Grab });
         }
         if inside.dragged() {
-            moved = Some((0, 0, inside.drag_delta()));
+            e.crop = slid(e.crop, inside.drag_delta() / z, fw, fh);
         }
-        for (sx, sy) in [(-1, -1), (1, -1), (-1, 1), (1, 1), (0, -1), (0, 1), (-1, 0), (1, 0)] {
+        let mut moved = None;
+        for (sx, sy) in HANDLES {
             let at = pos2(frame.center().x + sx as f32 * frame.width() / 2.0, frame.center().y + sy as f32 * frame.height() / 2.0);
-            let handle = Rect::from_center_size(at, vec2(16.0, 16.0));
-            let r = ui.interact(handle, egui::Id::unique(("crop-handle", sx, sy)), Sense::drag());
+            let r = ui.interact(Rect::from_center_size(at, vec2(16.0, 16.0)), handle(sx, sy), Sense::drag());
             p.rect_filled(Rect::from_center_size(at, vec2(7.0, 7.0)), 1.0, if r.hovered() || r.dragged() { Color32::WHITE } else { LABEL });
             if r.hovered() || r.dragged() {
                 ui.ctx().set_cursor_icon(match (sx, sy) {
@@ -210,12 +289,12 @@ impl App {
                 moved = Some((sx, sy, r.drag_delta()));
             }
         }
-        let Some((sx, sy, d)) = moved else { return };
+        let Some((sx, sy, d)) = moved else {
+            self.cropping = Some(e);
+            return;
+        };
         let (dx, dy) = (d.x as f64 / z as f64, d.y as f64 / z as f64);
         let (mut x0, mut x1, mut y0, mut y1) = (e.crop.left * fw, e.crop.right * fw, e.crop.top * fh, e.crop.bottom * fh);
-        if (sx, sy) == (0, 0) {
-            (x0, x1, y0, y1) = (x0 + dx, x1 + dx, y0 + dy, y1 + dy);
-        }
         match sx {
             -1 => x0 += dx,
             1 => x1 += dx,
@@ -226,7 +305,7 @@ impl App {
             1 => y1 += dy,
             _ => {}
         }
-        if let (Some(r), true) = (ratio, (sx, sy) != (0, 0)) {
+        if let Some(r) = ratio {
             if sx != 0 && sy != 0 {
                 let height = (x1 - x0) / r;
                 if sy < 0 {
@@ -245,8 +324,8 @@ impl App {
         let next = Crop { left: x0 / fw, right: x1 / fw, top: y0 / fh, bottom: y1 / fh, angle: e.crop.angle };
         if x1 - x0 > 0.02 * fw && y1 - y0 > 0.02 * fh && fits(&next, fw, fh) {
             e.crop = next;
-            self.cropping = Some(e);
         }
+        self.cropping = Some(e);
     }
 }
 
