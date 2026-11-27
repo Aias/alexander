@@ -27,9 +27,9 @@ pub const LABEL: Color32 = Color32::from_gray(150);
 pub const PLAIN: Color32 = Color32::from_gray(205);
 /// Titles, changed values, text on a chosen control and the outline of the focused photo.
 pub const STRONG: Color32 = Color32::from_gray(220);
-/// Under a label or a handle laid over a picture, and over what a crop leaves out.
+/// Under a label laid over a picture, and over what a crop leaves out.
 pub const SCRIM: Color32 = Color32::from_black_alpha(160);
-/// Shadows, and the dark edge that keeps the split's white line visible on a light picture.
+/// Shadows, and the dark edge that keeps the split's white line and ring visible on a light picture.
 pub const SHADOW: Color32 = Color32::from_black_alpha(100);
 
 /// The corner of a control or a cell.

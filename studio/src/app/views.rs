@@ -253,9 +253,15 @@ impl App {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
         let p = ui.painter().with_clip_rect(img);
-        p.vline(x, img.y_range(), Stroke::new(3.0f32, SHADOW));
-        p.vline(x, img.y_range(), Stroke::new(1.0f32, Color32::WHITE));
-        p.circle(pos2(x, img.center().y), 7.0, SCRIM, Stroke::new(1.5f32, Color32::WHITE));
+        let (c, r) = (pos2(x, img.center().y), 7.0);
+        // the line stops at the ring, which is clear inside; a dark edge under both keeps them visible on a light picture
+        for (edge, colour) in [(2.0f32, SHADOW), (0.0, Color32::WHITE)] {
+            let ring = Stroke::new(1.5 + edge, colour);
+            let reach = r + ring.width / 2.0;
+            p.vline(x, img.top()..=c.y - reach, Stroke::new(1.0 + edge, colour));
+            p.vline(x, c.y + reach..=img.bottom(), Stroke::new(1.0 + edge, colour));
+            p.circle_stroke(c, r, ring);
+        }
         if named {
             let (left, right) = if self.split_swap { ("After", self.before_name()) } else { (self.before_name(), "After") };
             pill(ui, img.left_top() + vec2(12.0, 12.0), Align2::LEFT_TOP, left);
