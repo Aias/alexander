@@ -54,10 +54,15 @@ jobs:
             libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
       - name: Install Rust
+        id: rust
         run: |
           rustup toolchain install stable --profile minimal --component clippy
           rustup default stable
+          echo "version=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
 
+      # The key carries the compiler's version and the lock file, and there is no
+      # fallback to an older cache: cargo rebuilds everything under another compiler,
+      # and a cache carried over to a new lock file keeps the old dependencies' output.
       - uses: actions/cache@v6
         with:
           path: |
@@ -65,8 +70,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             studio/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('studio/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.rust.outputs.version }}-${{ hashFiles('studio/Cargo.lock') }}
 
       - name: Test
         run: cargo test --locked -- --nocapture
@@ -84,9 +88,11 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
+        id: rust
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+          echo "version=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache@v6
         with:
@@ -95,8 +101,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             studio/target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('studio/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.rust.outputs.version }}-${{ hashFiles('studio/Cargo.lock') }}
 
       # The render tests use Metal when the runner's virtual machine exposes a
       # GPU and skip themselves with a note when it does not.
