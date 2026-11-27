@@ -27,9 +27,11 @@ pub enum Stage {
 }
 
 /// A photo on the GPU: its pixels and, once rendered, the kept result of every stage.
+/// `before`, when kept, is a finished picture shown wherever a canvas shows the photo itself.
 pub struct Photo {
     pub src: Tex,
     cache: Option<Cache>,
+    before: Option<Tex>,
 }
 
 impl Photo {
@@ -38,6 +40,9 @@ impl Photo {
     }
     pub fn rendered(&self) -> bool {
         self.cache.is_some()
+    }
+    pub fn has_before(&self) -> bool {
+        self.before.is_some()
     }
     /// The picture's own tone percentiles, as measured for the house tone step.
     pub fn percentiles(&self) -> Option<[f64; 5]> {
@@ -117,7 +122,7 @@ impl Engine {
     pub fn upload(&mut self, rgba: &[u8], w: u32, h: u32) -> Photo {
         let src = self.gpu.tex(w, h, Format::Rgba8UnormSrgb);
         self.gpu.write(&src, rgba, 4);
-        Photo { src, cache: None }
+        Photo { src, cache: None, before: None }
     }
 
     /// Let go of a photo's kept stages. Its next render starts from the beginning.
@@ -126,6 +131,22 @@ impl Engine {
             for t in [Some(c.soft), Some(c.d0), Some(c.neg), c.negb, Some(c.r), Some(c.fin)].into_iter().flatten() {
                 self.give(t);
             }
+        }
+        self.drop_before(photo);
+    }
+
+    /// Keep the finished picture as `view` shows it, to stand in for the photo itself.
+    pub fn keep_before(&mut self, photo: &mut Photo, view: &ViewPlan) {
+        self.drop_before(photo);
+        let (w, h) = photo.size();
+        let t = self.take(w, h, Format::Rgba8UnormSrgb);
+        self.draw(photo, view, &Canvas { origin: [0.0, 0.0], scale: 1.0, source: Canvas::RENDER, clip: false, angle: 0.0 }, &t.view, Format::Rgba8UnormSrgb, false);
+        photo.before = Some(t);
+    }
+
+    pub fn drop_before(&mut self, photo: &mut Photo) {
+        if let Some(t) = photo.before.take() {
+            self.give(t);
         }
         self.trim();
     }
@@ -616,12 +637,13 @@ impl Engine {
                 c.fin_levels += 1;
             }
         }
+        let shown = photo.before.as_ref().unwrap_or(&photo.src);
         let fin = match (&photo.cache, photo_only) {
             (Some(c), false) => &c.fin.view,
-            _ => &photo.src.view,
+            _ => &shown.view,
         };
         let numbers = Self::canvas_numbers(view, &Canvas { source, ..*canvas }, level, raw);
-        self.gpu.pass(&mut enc, Pass::Canvas, target, format, &numbers, &[fin, &photo.src.view], &[]);
+        self.gpu.pass(&mut enc, Pass::Canvas, target, format, &numbers, &[fin, &shown.view], &[]);
         self.gpu.submit(enc);
     }
 

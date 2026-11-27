@@ -10,9 +10,9 @@ pub const VIEW_BG: Color32 = Color32::from_gray(22);
 pub const BAR: Color32 = Color32::from_gray(29);
 const CELL: Color32 = Color32::from_gray(36);
 const CELL_HOVER: Color32 = Color32::from_gray(44);
-const CELL_SELECTED: Color32 = Color32::from_gray(58);
-const CELL_FOCUS: Color32 = Color32::from_gray(72);
-const FOCUS_LINE: Color32 = Color32::from_gray(170);
+const CELL_SELECTED: Color32 = Color32::from_gray(80);
+const CELL_FOCUS: Color32 = Color32::from_gray(104);
+const FOCUS_LINE: Color32 = Color32::from_gray(225);
 /// Labels: quieter than values and controls, but read at better than 5:1 on the panel.
 pub const LABEL: Color32 = Color32::from_gray(150);
 pub const TEXT: Color32 = Color32::from_gray(222);
@@ -167,7 +167,7 @@ impl App {
                         Mode::Detail => self.detail(ui),
                     }
                     if self.before() {
-                        pill(ui, ui.max_rect().min + vec2(12.0, 12.0), Align2::LEFT_TOP, "Before");
+                        pill(ui, ui.max_rect().min + vec2(12.0, 12.0), Align2::LEFT_TOP, self.before_name());
                     }
                 });
             } else {
@@ -338,7 +338,7 @@ impl App {
         p.vline(x, img.y_range(), Stroke::new(1.0f32, Color32::WHITE));
         p.circle(pos2(x, img.center().y), 7.0, Color32::from_black_alpha(170), Stroke::new(1.5f32, Color32::WHITE));
         if named {
-            let (left, right) = if self.split_swap { ("After", "Before") } else { ("Before", "After") };
+            let (left, right) = if self.split_swap { ("After", self.before_name()) } else { (self.before_name(), "After") };
             pill(ui, img.left_top() + vec2(12.0, 12.0), Align2::LEFT_TOP, left);
             pill(ui, img.right_top() + vec2(-12.0, 12.0), Align2::RIGHT_TOP, right);
         }
@@ -359,15 +359,14 @@ impl App {
         p.rect_filled(cell, CornerRadius::same(4), fill);
         let name_h = if named { 22.0 } else { 0.0 };
         let body = Rect::from_min_max(cell.min, pos2(cell.max.x, cell.max.y - name_h));
-        let fill = self.fill && self.mode == Mode::Grid;
-        let inner = body.shrink(if fill { 4.0 } else { cell.width().min(cell.height()) * 0.07 });
+        let inner = body.shrink(if self.fill { 4.0 } else { cell.width().min(cell.height()) * 0.07 });
         let item = self.lib.get(id).unwrap();
         match &item.status {
             Status::Ready => {
                 let b = px(inner, ppp);
                 // in Detail the large picture of the focused photo goes first
                 let rank = if focused && self.mode == Mode::Grid { 0 } else { rank_base };
-                let (tex, size) = self.tiers.thumb(item, [(b[2] - b[0]).max(1) as u32, (b[3] - b[1]).max(1) as u32], fill, rank);
+                let (tex, size) = self.tiers.thumb(item, [(b[2] - b[0]).max(1) as u32, (b[3] - b[1]).max(1) as u32], self.fill, rank);
                 if let Some(t) = tex {
                     let full = centred(inner, size[0], size[1], ppp);
                     let shown = inner.intersect(full);
@@ -389,11 +388,11 @@ impl App {
             let name = ui.fonts_mut(|f| f.layout_job(job));
             ui.painter().galley(pos2(inner.min.x, y - name.size().y / 2.0), name, colour);
             if let Some((t, w)) = mark {
-                ui.painter().image(t, Rect::from_min_size(pos2(inner.max.x - w, y - 5.5), vec2(w, 11.0)), uv(), LABEL);
+                ui.painter().image(t, Rect::from_min_size(pos2(inner.max.x - w, y - 5.5), vec2(w, 11.0)), uv(), colour);
             }
         }
         if focused && selected {
-            ui.painter().rect_stroke(cell, CornerRadius::same(4), Stroke::new(1.0f32, FOCUS_LINE), StrokeKind::Inside);
+            ui.painter().rect_stroke(cell, CornerRadius::same(4), Stroke::new(1.5f32, FOCUS_LINE), StrokeKind::Inside);
         }
         self.star(ui, id, cell);
     }
@@ -527,7 +526,7 @@ impl App {
             let (bw, bh) = ((b[2] - b[0]).max(1) as f32, (b[3] - b[1]).max(1) as f32);
             let (origin, (gw, gh), angle) = self.tiers.shown(item);
             let (gw, gh) = (gw as f32, gh as f32);
-            let z = if self.fill { (bw / gw).max(bh / gh) } else { (bw / gw).min(bh / gh) };
+            let z = (bw / gw).min(bh / gh);
             let (iw, ih) = ((gw * z).round().clamp(1.0, bw), (gh * z).round().clamp(1.0, bh));
             let img = centred(inner, iw as u32, ih as u32, ppp);
             let (sw, sh) = (iw / z / gw, ih / z / gh);

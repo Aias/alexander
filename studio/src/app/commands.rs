@@ -36,11 +36,13 @@ pub enum Command {
     Remove,
     View(Mode),
     Compare(Compare),
+    /// Before and Split show the default look, or with it already shown the photo itself.
+    BeforeDefault,
     Swap,
     Clipping,
     /// Closer, or with false further away: larger or smaller thumbnails in the grid.
     Zoom(bool),
-    /// Photos fill their cells in Grid and Survey, or with false fit inside them.
+    /// Thumbnails fill their cells in the grid and the filmstrip, or with false fit inside them.
     Fill(bool),
     Fit,
     Actual,
@@ -136,6 +138,7 @@ impl App {
                 self.zoom = None;
             }
             Command::Compare(c) => self.toggle_compare(c),
+            Command::BeforeDefault => self.before_default = !self.before_default,
             Command::Swap => self.split_swap = !self.split_swap,
             Command::Clipping => self.clipping = !self.clipping,
             Command::Zoom(closer) => {

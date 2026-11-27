@@ -89,6 +89,9 @@ impl App {
             for (c, label, keys) in [(Compare::Split, "Split", "Y"), (Compare::Before, "Before", "\\")] {
                 self.switch(ui, self.compare == c, label, keys, Command::Compare(c));
             }
+            if self.compare != Compare::After {
+                self.switch(ui, self.before_default, "Default Look", "⇧\\", Command::BeforeDefault);
+            }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 let starred_only = self.lib.starred_only();
                 self.switch(ui, starred_only, "Starred Only", "", Command::StarredOnly);

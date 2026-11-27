@@ -29,6 +29,8 @@ struct Session {
     thumb_pt: f32,
     #[serde(default)]
     fill: bool,
+    #[serde(default)]
+    before_default: bool,
     starred_only: bool,
     last_dir: Option<PathBuf>,
     recent: Vec<PathBuf>,
@@ -52,12 +54,12 @@ fn file() -> PathBuf {
 }
 
 /// What a session's file records, to tell whether it needs writing again.
-pub type Saved = (u64, Mode, u32, usize, usize, [bool; 3]);
+pub type Saved = (u64, Mode, u32, usize, usize, [bool; 4]);
 
 impl App {
     fn saved_key(&self) -> Saved {
         let r = &self.reference;
-        (self.lib.revision(), self.mode, self.thumb_pt.to_bits(), self.recent.len(), r.at, [r.shown, r.apart, self.fill])
+        (self.lib.revision(), self.mode, self.thumb_pt.to_bits(), self.recent.len(), r.at, [r.shown, r.apart, self.fill, self.before_default])
     }
 
     /// Open the library as the last session left it.
@@ -76,6 +78,7 @@ impl App {
         self.mode = s.mode;
         self.thumb_pt = s.thumb_pt;
         self.fill = s.fill;
+        self.before_default = s.before_default;
         self.last_dir = s.last_dir;
         self.recent = s.recent;
         self.reference.at = s.reference_at;
@@ -104,6 +107,7 @@ impl App {
             mode: self.mode,
             thumb_pt: self.thumb_pt,
             fill: self.fill,
+            before_default: self.before_default,
             starred_only: self.lib.starred_only(),
             last_dir: self.last_dir.clone(),
             recent: self.recent.clone(),

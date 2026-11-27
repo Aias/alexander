@@ -42,7 +42,8 @@ the panel and Crop the crop; clicking the tool the panel shows hides the panel. 
 shows the reference or hides it.
 
 The library is remembered between launches: its photos with their looks, virtual copies
-and stars, the selection, the view, the thumbnail size and whether cells are filled. The app writes it to
+and stars, the selection, the view, the thumbnail size, whether thumbnails are filled and
+what Before compares with. The app writes it to
 `~/Library/Application Support/studio.alexander.app/library.json` (on Linux,
 `~/.local/share/alexander-studio`) at most once a second while it changes and when it
 quits, and opens the photos again from their files at the next launch. A photo whose file
@@ -56,7 +57,8 @@ by side (N); and Detail, one photo large (E, Return, or double-click). Survey an
 have a filmstrip. The bar under the view counts the photos and the selection, names the
 focused photo, holds the compare switches, and holds the view's own settings: in Grid
 and Survey, Fit or Fill, and in Grid the thumbnail size; in Detail the zoom. Fit shows
-each photo whole inside its cell; Fill covers the cell with it and cuts off what is over.
+each thumbnail, in the grid and the filmstrip, whole inside its cell; Fill covers the cell
+with it and cuts off what is over. Survey always shows its photos whole.
 
 A cell names its photo; on macOS the SF Symbol for film beside the name marks a photo
 the process is on for. A star marks the photos worth keeping. It shows in the top-right corner of a starred photo's
@@ -69,7 +71,9 @@ Before (`\`) shows the photo itself in place of its render. Split (Y) shows both
 Survey and Detail, with the photo itself left of a divider and the render right of it. Drag
 the divider to move it, double-click it to put it back in the middle, and press Swap to
 put the photo itself on the right. Moving the divider draws the picture again without
-rendering it again.
+rendering it again. Default Look (`⇧\`), in the bar while comparing, compares with the
+Default preset instead: Before and Split show each photo that has a look as the Default
+preset renders it, to see what the look changes.
 
 A virtual copy is a second entry for the same file with a look of its own, so that two
 looks of one photo can stand side by side in Survey. It follows its photo in the library
@@ -115,6 +119,7 @@ the menu; plain keys go to the window, which leaves them to text being typed.
 | ⌘R | Show the selected photos in the Finder |
 | ⇧R | Show or hide the reference |
 | \\ | Before |
+| ⇧\\ | Compare with the default look in place of the photo itself |
 | Y | Split before and after |
 | J | Mark clipped highlights red and clipped shadows blue |
 | R | Crop the focused photo; Return or R again keeps the crop, Esc leaves it |

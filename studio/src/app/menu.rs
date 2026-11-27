@@ -97,6 +97,7 @@ impl MenuBar {
                 &sep(),
                 &b.check("Before", key(PLAIN, Code::Backslash), Command::Compare(Compare::Before), |a| a.compare == Compare::Before),
                 &b.check("Split", key(PLAIN, Code::KeyY), Command::Compare(Compare::Split), |a| a.compare == Compare::Split),
+                &b.check("Compare with Default Look", key(Modifiers::SHIFT, Code::Backslash), Command::BeforeDefault, |a| a.before_default),
                 &b.check("Swap Sides", None, Command::Swap, |a| a.split_swap),
                 &b.check("Clipping", key(PLAIN, Code::KeyJ), Command::Clipping, |a| a.clipping),
                 &sep(),

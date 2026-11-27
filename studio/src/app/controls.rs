@@ -213,6 +213,9 @@ fn dial(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, default: f64, deci
     let w = ui.available_width() - VALUE_W - ui.spacing().item_spacing.x;
     let r = slider(ui, v, range, w, log);
     ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    if *v == default {
+        ui.visuals_mut().widgets.inactive.fg_stroke.color = LABEL;
+    }
     ui.spacing_mut().button_padding.x = 2.0;
     ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).custom_formatter(|v, _| format!("{v:.decimals$}")));
     if r.double_clicked() {

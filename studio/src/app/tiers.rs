@@ -27,6 +27,10 @@ const HISTOGRAM_BINS: usize = 128;
 /// Look generations of previews start here, above any a photo reaches by editing.
 const PREVIEW_GEN: u64 = 1 << 62;
 
+/// What a histogram counts: the photo, its look generation, whether the photo itself is
+/// shown and whether the default look stands in for it.
+type HistogramKey = (Id, u64, bool, bool);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tier {
     Proxy,
@@ -50,8 +54,9 @@ impl Resident {
     fn bytes(&self) -> u64 {
         let (w, h) = self.photo.size();
         let k = self.plan.as_ref().map_or(1, |p| p.optics.scale as u64);
-        // the photo itself, five kept stages and the finished picture with its half-size copies
-        w as u64 * h as u64 * (4 + 18 * k * k)
+        // the photo itself, five kept stages, the finished picture with its half-size copies
+        // and the default look standing in for the photo
+        w as u64 * h as u64 * (4 + 18 * k * k + 4 * self.photo.has_before() as u64)
     }
 
     /// Fit to show: the photo as it is, or a render of its look (possibly an older one).
@@ -70,6 +75,8 @@ struct DrawKey {
     /// Drawn from a render of the current look (or of no look), not an older one kept on
     /// screen while the new one is made.
     complete: bool,
+    /// The default look stands in for the photo itself.
+    before_default: bool,
     gen: u64,
     canvas: [u32; 7],
     size: [u32; 2],
@@ -122,11 +129,12 @@ pub struct Tiers {
     /// The first stage the focused photo's last render had to redo, for the trace.
     pub last_focus_stage: Option<(Tier, Stage, f32)>,
     pub trace: bool,
-    /// The photo, look generation and whether the photo itself is shown, and the counts.
-    histogram: Option<((Id, u64, bool), Vec<f32>)>,
+    histogram: Option<(HistogramKey, Vec<f32>)>,
     /// A look shown on one photo without being given to it, and the generation it renders as.
     preview: Option<(Id, Settings, u64)>,
     previews: u64,
+    /// Where a view shows the photo itself, a photo with a look shows the default look.
+    before_default: bool,
 }
 
 pub fn default_view() -> ViewPlan {
@@ -153,6 +161,7 @@ impl Tiers {
             histogram: None,
             preview: None,
             previews: 0,
+            before_default: false,
         }
     }
 
@@ -182,6 +191,21 @@ impl Tiers {
             self.previews += 1;
             self.preview = preview.map(|(i, l)| (i, l, PREVIEW_GEN + self.previews));
         }
+    }
+
+    /// Show the default look where views show the photo itself, or stop and let go of its renders.
+    pub fn set_before_default(&mut self, on: bool) {
+        if self.before_default && !on {
+            for r in self.proxies.values_mut().chain(self.fulls.values_mut()) {
+                self.engine.drop_before(&mut r.photo);
+            }
+        }
+        self.before_default = on;
+    }
+
+    /// Whether the default look stands in for `item` where a drawing shows the photo itself.
+    fn shows_default(&self, item: &Item, photo_shown: bool) -> bool {
+        self.before_default && photo_shown && item.look.is_some()
     }
 
     /// `item` as its renders show it: with the previewed look when it is the photo previewed.
@@ -290,7 +314,7 @@ impl Tiers {
                         }
                         continue;
                     }
-                    if !self.ensure(Tier::Proxy, item, may_render, r.rank == 0) {
+                    if !self.ensure(Tier::Proxy, item, may_render, r.rank == 0, self.shows_default(item, before)) {
                         pending = true;
                     }
                     self.draw_thumb(item, r.size, before);
@@ -314,6 +338,7 @@ impl Tiers {
                         continue;
                     }
                     let mut tier = Tier::Proxy;
+                    let default = self.shows_default(item, before || canvas.source != Canvas::RENDER);
                     if wants_full {
                         let have = self.fulls.get(&item.id).map(|f| f.photo.size());
                         let fits = full_bytes + (long as u64 * long as u64 * 14) < FULL_BUDGET;
@@ -321,7 +346,7 @@ impl Tiers {
                             if have.is_some_and(|s| s.0.max(s.1) != long) && !self.loading.contains(&(item.id, long)) {
                                 to_load.push((item.id, long));
                             }
-                            let ok = self.ensure(Tier::Full, item, may_render, r.rank == 0);
+                            let ok = self.ensure(Tier::Full, item, may_render, r.rank == 0, default);
                             pending |= !ok;
                             let f = &self.fulls[&item.id];
                             full_bytes += f.bytes();
@@ -336,7 +361,7 @@ impl Tiers {
                         }
                     }
                     if tier == Tier::Proxy {
-                        pending |= !self.ensure(Tier::Proxy, item, may_render, r.rank == 0);
+                        pending |= !self.ensure(Tier::Proxy, item, may_render, r.rank == 0, default);
                     }
                     self.draw_canvas(item, tier, canvas, grid, r.size, before);
                 }
@@ -355,9 +380,9 @@ impl Tiers {
     }
 
     /// Put `item` on the GPU at `tier` (the proxy is uploaded on demand; a full grid must
-    /// have arrived) and render it when its look changed. False when a render was owed and
-    /// left for later.
-    fn ensure(&mut self, tier: Tier, item: &Item, may_render: bool, focused: bool) -> bool {
+    /// have arrived) and render it when its look changed, with a render of the default look
+    /// kept first when `default`. False when a render was owed and left for later.
+    fn ensure(&mut self, tier: Tier, item: &Item, may_render: bool, focused: bool, default: bool) -> bool {
         let frame = self.frame;
         if tier == Tier::Proxy && !self.proxies.contains_key(&item.id) {
             // uploads share the frame's budget with renders, so a screen of hundreds of
@@ -373,13 +398,23 @@ impl Tiers {
         let Some(res) = map.get_mut(&item.id) else { return false };
         res.used = frame;
         let Some(look) = &item.look else { return true };
+        let planner = &mut self.planners[tier as usize];
+        if default && !res.photo.has_before() {
+            if !may_render {
+                return false;
+            }
+            let d = Settings::default();
+            let plan = planner.plan(&d, res.photo.size(), item.auto_ev(&d), item.area(&d), self.engine.gpu.max_dim);
+            self.engine.render(&mut res.photo, &plan);
+            self.engine.keep_before(&mut res.photo, &plan.view);
+            res.gen = None;
+        }
         if !res.stale(item) {
             return true;
         }
         if !may_render {
             return false;
         }
-        let planner = &mut self.planners[tier as usize];
         let plan = planner.plan(look, res.photo.size(), item.auto_ev(look), item.area(look), self.engine.gpu.max_dim);
         let t = Instant::now();
         if let Some(stage) = self.engine.render(&mut res.photo, &plan) {
@@ -461,7 +496,7 @@ impl Tiers {
         let p = item.proxy.as_ref()?;
         let source = before || item.look.is_none();
         let canvas = thumb_canvas(item, (p.w, p.h), size, source);
-        Some(DrawKey { tier: Tier::Proxy, complete: true, gen: item.gen, canvas: canvas_bits(&canvas), size })
+        Some(DrawKey { tier: Tier::Proxy, complete: true, before_default: self.shows_default(item, before), gen: item.gen, canvas: canvas_bits(&canvas), size })
     }
 
     /// The key of a canvas of `item` drawn from a current render at `tier`. A full grid
@@ -473,7 +508,7 @@ impl Tiers {
             Tier::Full => grid.0,
         };
         let c = scaled(canvas, pw, grid, before || item.look.is_none());
-        Some(DrawKey { tier, complete: true, gen: item.gen, canvas: canvas_bits(&c), size })
+        Some(DrawKey { tier, complete: true, before_default: self.shows_default(item, c.source != Canvas::RENDER), gen: item.gen, canvas: canvas_bits(&c), size })
     }
 
     /// Mark a photo on the GPU as needed this frame, so it is not let go of.
@@ -491,7 +526,8 @@ impl Tiers {
         }
         let source = before || item.look.is_none();
         let canvas = thumb_canvas(item, res.photo.size(), size, source);
-        let key = DrawKey { tier: Tier::Proxy, complete: !res.stale(item), gen: item.gen, canvas: canvas_bits(&canvas), size };
+        let default = self.shows_default(item, before);
+        let key = DrawKey { tier: Tier::Proxy, complete: !res.stale(item) && (!default || res.photo.has_before()), before_default: default, gen: item.gen, canvas: canvas_bits(&canvas), size };
         let view = Self::view_of(res, item);
         self.draw_into(true, item.id, Tier::Proxy, key, canvas, view, wgpu::FilterMode::Linear);
     }
@@ -507,7 +543,8 @@ impl Tiers {
             return;
         }
         let c = scaled(canvas, res.photo.size().0, grid, before || item.look.is_none());
-        let key = DrawKey { tier, complete: !res.stale(item), gen: item.gen, canvas: canvas_bits(&c), size };
+        let default = self.shows_default(item, c.source != Canvas::RENDER);
+        let key = DrawKey { tier, complete: !res.stale(item) && (!default || res.photo.has_before()), before_default: default, gen: item.gen, canvas: canvas_bits(&c), size };
         let view = Self::view_of(res, item);
         self.draw_into(false, item.id, tier, key, c, view, wgpu::FilterMode::Nearest);
     }
@@ -587,10 +624,11 @@ impl Tiers {
         let shown = self.shown_item(item);
         let item = &*shown;
         let source = before || item.look.is_none();
-        let key = (item.id, item.gen, source);
+        let default = self.shows_default(item, before);
+        let key = (item.id, item.gen, source, default);
         if self.histogram.as_ref().is_none_or(|h| h.0 != key) {
             item.proxy.as_ref()?;
-            self.ensure(Tier::Proxy, item, true, false);
+            self.ensure(Tier::Proxy, item, true, false, default);
             let res = self.proxies.get_mut(&item.id)?;
             let view = Self::view_of(res, item);
             let (origin, (w, h), angle) = within(item, res.photo.size());

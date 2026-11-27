@@ -123,9 +123,11 @@ pub struct App {
     mode: Mode,
     panel: bool,
     thumb_pt: f32,
-    /// Grid and Survey: photos fill their cells, cut to them, rather than fit inside.
+    /// Thumbnails in the grid and the filmstrip fill their cells, cut to them, rather than fit inside.
     fill: bool,
     compare: Compare,
+    /// Before and Split show photos with a look in the default look, not as they are.
+    before_default: bool,
     /// Split: the divider's place across the picture, from 0 to 1, and whether the photo
     /// itself is on the right.
     split: f32,
@@ -205,6 +207,7 @@ impl App {
             thumb_pt: 168.0,
             fill: false,
             compare: Compare::After,
+            before_default: false,
             split: 0.5,
             split_swap: false,
             clipping: false,
@@ -245,7 +248,7 @@ impl App {
             menu: Some(menu::MenuBar::new(&cc.egui_ctx)),
             recent: Vec::new(),
             remember,
-            saved: ((0, Mode::Grid, 0, 0, 0, [false; 3]), std::time::Instant::now()),
+            saved: ((0, Mode::Grid, 0, 0, 0, [false; 4]), std::time::Instant::now()),
             dialog: None,
             waker: Waker::from(Arc::new(Repaint(cc.egui_ctx.clone()))),
         };
@@ -542,6 +545,7 @@ impl App {
             (none, Key::Enter, Command::View(Mode::Detail)),
             (none, Key::Tab, Command::Panel),
             (shift, Key::R, Command::Reference),
+            (shift, Key::Pipe, Command::BeforeDefault),
             (none, Key::Backslash, Command::Compare(Compare::Before)),
             (none, Key::Y, Command::Compare(Compare::Split)),
             (none, Key::J, Command::Clipping),
@@ -723,6 +727,11 @@ impl App {
         self.compare == Compare::Before
     }
 
+    /// The name of what Before shows.
+    fn before_name(&self) -> &'static str {
+        if self.before_default { "Default Look" } else { "Before" }
+    }
+
     /// Switch a compare on, or off again when it is already on.
     fn toggle_compare(&mut self, c: Compare) {
         self.compare = if self.compare == c { Compare::After } else { c };
@@ -776,6 +785,7 @@ impl eframe::App for App {
         self.keys(ctx);
         let actions = self.layout(ui);
         self.tiers.set_preview(self.preview_wanted.take());
+        self.tiers.set_before_default(self.before_default);
         if self.cropping.as_ref().is_some_and(|e| self.lib.focus != Some(e.id) || self.mode != Mode::Detail) {
             self.finish_crop();
             if self.mode == Mode::Detail && self.can(&Command::Crop) {
