@@ -6,6 +6,7 @@ mod controls;
 mod crop;
 #[cfg(target_os = "macos")]
 pub mod finder;
+mod help;
 #[cfg(target_os = "macos")]
 mod menu;
 #[cfg(target_os = "macos")]

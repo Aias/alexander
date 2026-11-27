@@ -1,6 +1,7 @@
 //! The controls panel: the histogram, the process switch, the knobs in sections and the
 //! look commands. It edits one `Settings`; the change is carried over to every selected photo.
 
+use super::help::help;
 use super::views::{label_family, segmented, title_font, LABEL, TEXT, VIEW_BG};
 use super::{App, Command};
 use alexander_studio::film::{Dev, FilmKind, Filter};
@@ -11,6 +12,7 @@ use std::ops::RangeInclusive;
 
 const LABEL_W: f32 = 116.0;
 const VALUE_W: f32 = 44.0;
+const HELP_W: f32 = 250.0;
 const HANDLE_R: f32 = 5.0;
 const RAIL: Color32 = Color32::from_gray(66);
 const HANDLE: Color32 = Color32::from_gray(205);
@@ -179,15 +181,40 @@ pub fn slider(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, width: f32, 
 /// the pointer, and a click on it asks for the default back: the return value.
 fn name(ui: &mut Ui, label: &str, tip: &str, changed: bool) -> bool {
     let (rect, r) = ui.allocate_exact_size(vec2(LABEL_W, ui.spacing().interact_size.y), if changed { Sense::click() } else { Sense::hover() });
-    let link = changed && r.hovered();
+    let help = help(label).filter(|_| r.contains_pointer() && ui.input(|i| i.modifiers.alt));
+    let link = changed && r.hovered() && help.is_none();
     if link {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
     let text = RichText::new(label).family(label_family()).color(if link { TEXT } else { LABEL });
     let galley = WidgetText::from(if link { text.underline() } else { text }).into_galley(ui, Some(TextWrapMode::Truncate), rect.width(), TextStyle::Body);
     ui.painter().galley(pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, LABEL);
-    let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
+    let r = match help {
+        Some(text) => {
+            help_card(ui, label, text, rect);
+            r
+        }
+        None if tip.is_empty() => r,
+        None => r.on_hover_text(tip),
+    };
     changed && r.clicked()
+}
+
+fn help_card(ui: &Ui, label: &str, text: &str, at: Rect) {
+    ui.ctx().set_cursor_icon(CursorIcon::Help);
+    egui::Area::new(egui::Id::unique("setting help"))
+        .order(egui::Order::Tooltip)
+        .pivot(Align2::RIGHT_TOP)
+        .fixed_pos(pos2(ui.clip_rect().left() - 8.0, at.top() - 4.0))
+        .interactable(false)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).inner_margin(8).show(ui, |ui| {
+                ui.set_width(HELP_W);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(RichText::new(label).font(title_font()).color(Color32::WHITE));
+                ui.label(RichText::new(text).color(TEXT));
+            });
+        });
 }
 
 /// A labelled slider and its value. Clicking the name or double-clicking the slider
@@ -339,7 +366,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings, bordered: bool) {
             ui.add(egui::Checkbox::without_text(&mut s.auto_ev));
             ui.add_enabled_ui(s.auto_ev, |ui| dial(ui, &mut s.auto_ev_target, 0.2..=0.7, d.auto_ev_target, 2, false));
         });
-        knob(ui, "Exposure", "Stops", &mut s.ev, -3.0..=3.0, d.ev, 2);
+        knob(ui, "Compensation", "Stops", &mut s.ev, -3.0..=3.0, d.ev, 2);
         if bordered {
             let border = "A uniform border round the picture, such as a print's paper or letterbox bars. Keep: exposure and tones are measured inside it. Strip: the same, and only the picture inside is shown and exported. Off: not looked for";
             toggles(ui, "Border", border, &mut s.frame, d.frame, &[(Frame::Keep, "Keep", ""), (Frame::Strip, "Strip", ""), (Frame::Off, "Off", "")]);

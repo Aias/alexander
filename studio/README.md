@@ -165,7 +165,7 @@ beside Size, since the two together set how large the grain is in the frame. Aut
 and the display value it places the median at share a row. Clicking a
 heading opens or closes it. A setting off its default underlines its name under the
 pointer, and clicking the name restores the default; double-clicking a slider does the
-same. A slider's value, shown to two decimals at most, can also be dragged or typed. Stock, Filter, Border and Finish are
+same. Holding ⌥ over a setting's name shows what it does and where its value comes from. A slider's value, shown to two decimals at most, can also be dragged or typed. Stock, Filter, Border and Finish are
 rows of toggles; the full names of the stocks and finishes are in their tooltips. Copy, Paste and Reset sit under the knobs, and the
 panel's ••• menu saves and loads looks as JSON and copies the look as `twb2.py` flags. In
 Detail 100% means one pixel of the simulation grid to one pixel of the screen.
