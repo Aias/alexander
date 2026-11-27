@@ -17,6 +17,7 @@ mod session;
 mod shots;
 #[cfg(target_os = "macos")]
 mod symbols;
+mod test_strip;
 mod theme;
 mod tiers;
 mod views;
@@ -178,6 +179,9 @@ pub struct App {
     new_preset: Option<presets::Draft>,
     /// The preset under the pointer this frame, to show on the focused photo.
     preview_wanted: Option<(Id, Settings)>,
+    /// The settings the test strip in Detail steps through, the first across it and the
+    /// second down it. Empty when there is no strip.
+    test_strip: Vec<controls::Knob>,
     #[cfg(target_os = "macos")]
     menu: Option<menu::MenuBar>,
     /// Folders photos were opened from, latest first, for Open Recent.
@@ -250,6 +254,7 @@ impl App {
             cropping: None,
             new_preset: None,
             preview_wanted: None,
+            test_strip: Vec::new(),
             #[cfg(target_os = "macos")]
             menu: Some(menu::MenuBar::new(&cc.egui_ctx)),
             recent: Vec::new(),
@@ -578,6 +583,9 @@ impl App {
                 self.run(ctx, c);
             }
         }
+        if !self.test_strip.is_empty() && k(none, Key::Escape) {
+            self.test_strip.clear();
+        }
         if k(none, Key::Escape) && self.mode != Mode::Grid {
             self.mode = Mode::Grid;
             self.scroll_to_focus = true;
@@ -814,6 +822,9 @@ impl eframe::App for App {
         }
         for c in actions {
             self.run(ctx, c);
+        }
+        if self.mode != Mode::Detail {
+            self.test_strip.clear();
         }
         self.poll_dialog();
         self.export_step();

@@ -110,7 +110,7 @@ the menu; plain keys go to the window, which leaves them to text being typed.
 | ⇧⌘O | Open from the Photos library (macOS) |
 | ⇧⌘E | Export the selected photos |
 | G / N / E or Return | Grid / Survey / Detail |
-| Esc | Back to the grid |
+| Esc | Put the test strip away, or with none shown go back to the grid |
 | Arrow keys | Next or previous photo; ⇧ extends the selection in the library |
 | ⌘A / ⌘D | Select all / none |
 | Delete or Backspace | Remove from the library (the file stays on disk; ⌘Z puts it back) |
@@ -123,6 +123,7 @@ the menu; plain keys go to the window, which leaves them to text being typed.
 | ⇧\\ | Compare with the default look in place of the photo itself |
 | Y | Split before and after |
 | J | Mark clipped highlights red and clipped shadows blue |
+| T | Put the setting under the pointer on the test strip, or take it off |
 | R | Crop the focused photo; Return or R again keeps the crop, Esc leaves it |
 | Space and drag | Detail, at Fit: slide a cropped photo under its crop |
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |
@@ -181,6 +182,26 @@ same. Holding ⌥ over a setting's name shows what it does and where its value c
 rows of toggles; the full names of the stocks and finishes are in their tooltips. Copy, Paste and Reset sit under the knobs, and the
 panel's ••• menu saves and loads looks as JSON and copies the look as `twb2.py` flags. In
 Detail 100% means one pixel of the simulation grid to one pixel of the screen.
+
+A test strip shows the focused photo in Detail under a run of values of a setting, as a
+darkroom printer exposes a strip of paper in steps to choose an exposure by eye. Resting the
+pointer on a slider's row shows a switch at the end of the setting's name. Clicking the
+switch, or pressing T with the pointer on the row, puts the setting on the strip. The strip
+then covers the photo with 25 patches, each a small picture of the photo, stepping through
+the slider's range in reading order from the top left to the bottom right. Choosing a second
+setting the same way makes a strip of two settings: the first steps across in five values
+and the second steps down in five. Choosing another setting replaces the second. The switch
+of a setting on the strip stays lit, with three marks in a row for the setting stepping
+across and three in a column for the setting stepping down. Clicking it again, or T, takes
+the setting off.
+
+An outline marks the patch nearest the photo's current values. Resting the pointer on a
+patch shows its values, and clicking the patch gives them to every selected photo, as one
+step for undo. Each patch looks at the photo as Detail does. At Fit a patch shows the whole
+photo, for judging tones. At 100% (Z, or ⌘1) a patch shows the middle of the view pixel for
+pixel, for judging grain and softness, and scrolling or dragging moves every patch together.
+Esc puts the strip away, as does leaving Detail. Choosing a setting for the strip from Grid
+or Survey opens Detail. Grid, Minutes and Page size have no switch.
 
 ## Exports
 

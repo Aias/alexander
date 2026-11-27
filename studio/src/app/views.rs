@@ -44,7 +44,7 @@ fn uv_within(shown: Rect, full: Rect) -> Rect {
 }
 
 /// A dark label over a picture, with its corner `align` at `at`.
-fn pill(ui: &Ui, at: Pos2, align: Align2, text: &str) {
+pub fn pill(ui: &Ui, at: Pos2, align: Align2, text: &str) {
     let g = ui.painter().layout_no_wrap(text.into(), small_font(), STRONG);
     let pill = align.anchor_size(at, g.size() + vec2(16.0, 8.0));
     ui.painter().rect_filled(pill, CORNER, SCRIM);
@@ -494,11 +494,43 @@ impl App {
                 _ => CursorIcon::Grab,
             });
         }
-        let vp = px(rect, ppp);
-        let (vw, vh) = ((vp[2] - vp[0]) as f32, (vp[3] - vp[1]) as f32);
+        if !self.test_strip.is_empty() {
+            self.test_strip_view(ui, rect, &resp, id);
+            return;
+        }
         // positions below are within the part shown; `origin` places it on the full grid
         let (origin, (gw, gh), angle) = self.tiers.shown(item);
         let (gwf, ghf) = (gw as f32, gh as f32);
+        let Some((at, corner, z)) = self.detail_frame(ui, &resp, px(rect, ppp), (gwf, ghf), true) else { return };
+        let shown = from_px(at, ppp);
+        let size = [(at[2] - at[0]) as u32, (at[3] - at[1]) as u32];
+        let canvas = Canvas { origin: [origin[0] + corner[0], origin[1] + corner[1]], scale: 1.0 / z, source: self.split_source(size[0]), clip: self.clipping, angle };
+        if let Some(pos) = self.lib.shown_position(id) {
+            for j in [pos + 1, pos.wrapping_sub(1)] {
+                if let Some(next) = self.lib.shown().get(j).and_then(|&n| self.lib.get(n)) {
+                    self.tiers.prefetch(next);
+                }
+            }
+        }
+        let Some(item) = self.lib.get(id) else { return };
+        if let Some(t) = self.tiers.canvas(item, canvas, size, 0) {
+            ui.painter().image(t, shown, uv(), Color32::WHITE);
+        } else if let Some(t) = self.tiers.thumb_tex(item.id) {
+            // the photo's thumbnail (its shown part), placed where the photo is and cut to the view
+            let full = Rect::from_min_size(pos2((at[0] as f32 - corner[0] * z) / ppp, (at[1] as f32 - corner[1] * z) / ppp), vec2(gwf * z / ppp, ghf * z / ppp));
+            ui.painter().with_clip_rect(rect).image(t, full, uv(), Color32::WHITE);
+        }
+        self.divider(ui, id, shown, true);
+    }
+
+    /// Where Detail's zoom and centre put the part of the photo shown, `gwf` by `ghf` grid
+    /// pixels, in a view of `vp` physical pixels: the pixels of the view it covers, the
+    /// position within that part of their top-left corner, and the zoom. Scrolling, pinching
+    /// and dragging over `resp` move the photo first, and with `click` a click goes between
+    /// fit and 100% about its point.
+    pub(super) fn detail_frame(&mut self, ui: &Ui, resp: &egui::Response, vp: [i32; 4], (gwf, ghf): (f32, f32), click: bool) -> Option<([i32; 4], [f32; 2], f32)> {
+        let ppp = ui.ctx().pixels_per_point();
+        let (vw, vh) = ((vp[2] - vp[0]) as f32, (vp[3] - vp[1]) as f32);
         let fit = (vw / gwf).min(vh / ghf);
         self.last_fit = fit;
         let mut z = self.zoom.unwrap_or(fit);
@@ -523,7 +555,7 @@ impl App {
             let d = resp.drag_delta();
             c = [c[0] - d.x * ppp / z, c[1] - d.y * ppp / z];
         }
-        if resp.clicked() {
+        if click && resp.clicked() {
             if self.zoom.is_some() {
                 self.zoom = None;
             } else if let Some(h) = resp.interact_pointer_pos() {
@@ -550,27 +582,7 @@ impl App {
         let y0 = (vc[1] - c[1] * z).round().max(vp[1] as f32) as i32;
         let x1 = (vc[0] + (gwf - c[0]) * z).round().min(vp[2] as f32) as i32;
         let y1 = (vc[1] + (ghf - c[1]) * z).round().min(vp[3] as f32) as i32;
-        if x1 <= x0 || y1 <= y0 {
-            return;
-        }
-        let shown = from_px([x0, y0, x1, y1], ppp);
-        let canvas = Canvas { origin: [origin[0] + c[0] + (x0 as f32 - vc[0]) / z, origin[1] + c[1] + (y0 as f32 - vc[1]) / z], scale: 1.0 / z, source: self.split_source((x1 - x0) as u32), clip: self.clipping, angle };
-        if let Some(pos) = self.lib.shown_position(id) {
-            for j in [pos + 1, pos.wrapping_sub(1)] {
-                if let Some(next) = self.lib.shown().get(j).and_then(|&n| self.lib.get(n)) {
-                    self.tiers.prefetch(next);
-                }
-            }
-        }
-        let Some(item) = self.lib.get(id) else { return };
-        if let Some(t) = self.tiers.canvas(item, canvas, [(x1 - x0) as u32, (y1 - y0) as u32], 0) {
-            ui.painter().image(t, shown, uv(), Color32::WHITE);
-        } else if let Some(t) = self.tiers.thumb_tex(item.id) {
-            // the photo's thumbnail (its shown part), placed where the photo is and cut to the view
-            let full = Rect::from_min_max(pos2((vc[0] - c[0] * z) / ppp, (vc[1] - c[1] * z) / ppp), pos2((vc[0] + (gwf - c[0]) * z) / ppp, (vc[1] + (ghf - c[1]) * z) / ppp));
-            ui.painter().with_clip_rect(rect).image(t, full, uv(), Color32::WHITE);
-        }
-        self.divider(ui, id, shown, true);
+        (x1 > x0 && y1 > y0).then(|| ([x0, y0, x1, y1], [c[0] + (x0 as f32 - vc[0]) / z, c[1] + (y0 as f32 - vc[1]) / z], z))
     }
 
     fn filmstrip(&mut self, ui: &mut Ui) {
