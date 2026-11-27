@@ -17,6 +17,7 @@ mod session;
 mod shots;
 #[cfg(target_os = "macos")]
 mod symbols;
+mod theme;
 mod tiers;
 mod views;
 mod workers;
@@ -195,7 +196,7 @@ impl App {
         let rs = cc.wgpu_render_state.as_ref().expect("the wgpu renderer");
         let engine = Engine::new(rs.device.clone(), rs.queue.clone(), Precision::Half);
         let tiers = Tiers::new(engine, rs.device.clone(), rs.renderer.clone());
-        views::style(&cc.egui_ctx);
+        theme::style(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
         let workers = Workers::new(move || ctx.request_repaint());
         let shots = shots::Shots::from_env(paths.clone());

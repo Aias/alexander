@@ -3,7 +3,7 @@
 //! data folder, by name; pictures added to it are copied there. It floats over the main window
 //! or stands in a window of its own, where pictures can also be dropped on it.
 
-use super::views::LABEL;
+use super::theme::{CORNER, LABEL, WELL};
 use super::workers::Job;
 use super::{session, App, Dialog};
 use egui::{Align, Button, Color32, CursorIcon, Layout, Pos2, Rect, RichText, Sense, TextureHandle, Ui, Vec2, ViewportBuilder, ViewportId};
@@ -152,7 +152,7 @@ impl App {
         });
         let area = ui.available_rect_before_wrap();
         let r = ui.allocate_rect(area, Sense::click_and_drag());
-        ui.painter().rect_filled(area, egui::CornerRadius::same(4), super::views::VIEW_BG);
+        ui.painter().rect_filled(area, CORNER, WELL);
         match self.reference.current().and_then(|p| self.reference.loaded.get(p)) {
             Some(Some(Ok(t))) => {
                 let size = t.size_vec2();

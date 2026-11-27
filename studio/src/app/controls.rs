@@ -2,7 +2,8 @@
 //! look commands. It edits one `Settings`; the change is carried over to every selected photo.
 
 use super::help::help;
-use super::views::{label_family, segmented, title_font, LABEL, TEXT, VIEW_BG};
+use super::theme::{label_family, title_font, CORNER, FILL_1, FILL_2, FILL_3, LABEL, PANEL, PLAIN, QUIET, STRONG, WELL};
+use super::views::segmented;
 use super::{App, Command};
 use alexander_studio::film::{Dev, FilmKind, Filter};
 use alexander_studio::params::{Frame, Repro, Settings, View};
@@ -14,12 +15,6 @@ const LABEL_W: f32 = 116.0;
 const VALUE_W: f32 = 44.0;
 const HELP_W: f32 = 250.0;
 const HANDLE_R: f32 = 5.0;
-const RAIL: Color32 = Color32::from_gray(66);
-const HANDLE: Color32 = Color32::from_gray(205);
-const RULE: Color32 = Color32::from_gray(44);
-const HISTOGRAM: Color32 = Color32::from_gray(150);
-const VALUE_AT_DEFAULT: Color32 = Color32::from_gray(146);
-const VALUE_CHANGED: Color32 = Color32::from_gray(210);
 const EDGE: Margin = Margin { left: 0, right: 12, top: 0, bottom: 0 };
 
 impl App {
@@ -67,9 +62,9 @@ impl App {
 fn histogram(ui: &mut Ui, bins: Option<&[f32]>, clipping: &mut bool) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 88.0), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, CornerRadius::same(4), VIEW_BG);
+    p.rect_filled(rect, CORNER, WELL);
     for i in 1..4 {
-        p.vline(rect.left() + rect.width() * i as f32 / 4.0, rect.y_range(), Stroke::new(1.0f32, Color32::from_gray(32)));
+        p.vline(rect.left() + rect.width() * i as f32 / 4.0, rect.y_range(), Stroke::new(1.0f32, PANEL));
     }
     let Some(bins) = bins else { return };
     let top = bins[1..bins.len() - 1].iter().copied().fold(1.0, f32::max);
@@ -78,7 +73,7 @@ fn histogram(ui: &mut Ui, bins: Option<&[f32]>, clipping: &mut bool) {
     for (i, &c) in bins.iter().enumerate() {
         let h = (c / top).min(1.0) * inner.height();
         let x = rect.left() + i as f32 * w;
-        p.rect_filled(Rect::from_min_max(pos2(x, inner.bottom() - h), pos2(x + w, inner.bottom())), CornerRadius::ZERO, HISTOGRAM);
+        p.rect_filled(Rect::from_min_max(pos2(x, inner.bottom() - h), pos2(x + w, inner.bottom())), CornerRadius::ZERO, LABEL);
     }
     let total: f32 = bins.iter().sum();
     for (corner, count, toward) in [(rect.left_top() + vec2(10.0, 10.0), bins[0], -1.0), (rect.right_top() + vec2(-10.0, 10.0), bins[bins.len() - 1], 1.0)] {
@@ -87,11 +82,11 @@ fn histogram(ui: &mut Ui, bins: Option<&[f32]>, clipping: &mut bool) {
             *clipping = !*clipping;
         }
         let lit = count > total * 0.001;
-        let fill = if lit { Color32::WHITE } else { Color32::from_gray(80) };
+        let fill = if lit { Color32::WHITE } else { FILL_3 };
         let pts = [corner + vec2(-4.0 * toward, -4.0), corner + vec2(4.0 * toward, -4.0), corner + vec2(4.0 * toward, 4.0)];
         ui.painter().add(Shape::convex_polygon(pts.to_vec(), fill, Stroke::NONE));
         if *clipping {
-            ui.painter().rect_stroke(Rect::from_center_size(corner, vec2(14.0, 14.0)), CornerRadius::same(2), Stroke::new(1.0f32, Color32::from_gray(200)), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(Rect::from_center_size(corner, vec2(14.0, 14.0)), CORNER, Stroke::new(1.0f32, PLAIN), egui::StrokeKind::Inside);
         }
     }
 }
@@ -170,11 +165,11 @@ pub fn slider(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, width: f32, 
     }
     let c = pos2(x_of(*v), rect.center().y);
     let p = ui.painter();
-    p.hline(rail, c.y, Stroke::new(2.0f32, RAIL));
+    p.hline(rail, c.y, Stroke::new(2.0f32, FILL_2));
     let lit = r.hovered() || r.dragged() || r.has_focus();
-    p.circle_filled(c, HANDLE_R + if lit { 1.0 } else { 0.0 }, if lit { Color32::WHITE } else { HANDLE });
+    p.circle_filled(c, HANDLE_R + if lit { 1.0 } else { 0.0 }, if lit { Color32::WHITE } else { PLAIN });
     if r.has_focus() {
-        p.circle_stroke(c, HANDLE_R + 3.5, Stroke::new(1.0f32, Color32::from_gray(200)));
+        p.circle_stroke(c, HANDLE_R + 3.5, Stroke::new(1.0f32, PLAIN));
     }
     r
 }
@@ -188,7 +183,7 @@ fn name(ui: &mut Ui, label: &str, tip: &str, changed: bool) -> bool {
     if link {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
-    let text = RichText::new(label).family(label_family()).color(if link { TEXT } else { LABEL });
+    let text = RichText::new(label).family(label_family()).color(if link { STRONG } else { LABEL });
     let galley = WidgetText::from(if link { text.underline() } else { text }).into_galley(ui, Some(TextWrapMode::Truncate), rect.width(), TextStyle::Body);
     ui.painter().galley(pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, LABEL);
     let r = match help {
@@ -213,8 +208,8 @@ fn help_card(ui: &Ui, label: &str, text: &str, at: Rect) {
             egui::Frame::popup(ui.style()).inner_margin(8).show(ui, |ui| {
                 ui.set_width(HELP_W);
                 ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(RichText::new(label).font(title_font()).color(Color32::WHITE));
-                ui.label(RichText::new(text).color(TEXT));
+                ui.label(RichText::new(label).font(title_font()).color(STRONG));
+                ui.label(text);
             });
         });
 }
@@ -242,7 +237,7 @@ fn dial(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, default: f64, deci
     let w = ui.available_width() - VALUE_W - ui.spacing().item_spacing.x;
     let r = slider(ui, v, range, w, log);
     ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-    ui.visuals_mut().widgets.inactive.fg_stroke.color = if *v == default { VALUE_AT_DEFAULT } else { VALUE_CHANGED };
+    ui.visuals_mut().widgets.inactive.fg_stroke.color = if *v == default { QUIET } else { STRONG };
     ui.spacing_mut().button_padding.x = 2.0;
     ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).custom_formatter(|v, _| format!("{v:.decimals$}")));
     if r.double_clicked() {
@@ -290,9 +285,9 @@ fn check(ui: &mut Ui, label: &str, tip: &str, v: &mut bool, default: bool) {
 /// A heading over a rule across the panel, brighter under the pointer when it can be clicked.
 pub(super) fn title(ui: &mut Ui, name: &str, sense: Sense) -> (Rect, egui::Response) {
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), sense);
-    ui.painter().hline(rect.x_range(), rect.top(), Stroke::new(1.0f32, RULE));
+    ui.painter().hline(rect.x_range(), rect.top(), Stroke::new(1.0f32, FILL_1));
     let rect = rect.translate(vec2(0.0, ui.spacing().item_spacing.y / 2.0));
-    ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, name, title_font(), if r.hovered() && sense.senses_click() { Color32::WHITE } else { TEXT });
+    ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, name, title_font(), if r.hovered() && sense.senses_click() { Color32::WHITE } else { STRONG });
     (rect, r)
 }
 
