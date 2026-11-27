@@ -1,96 +1,15 @@
 //! Laying out the window: the three views, the filmstrip and where the panels go.
 
+use super::theme::{small_font, body_font, BAR, BOX_CORNER, CORNER, FILL_1, FILL_2, FILL_3, FILL_4, LABEL, PLAIN, RAISED, SCRIM, SHADOW, STRONG, WELL};
 use super::{App, Command, Compare, Mode};
 use alexander_studio::engine::Canvas;
 use alexander_studio::library::{Id, Item, Status};
 use egui::text::{LayoutJob, TextWrapping};
-use egui::{pos2, vec2, Align2, Button, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Key, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
-
-pub const VIEW_BG: Color32 = Color32::from_gray(22);
-pub const BAR: Color32 = Color32::from_gray(29);
-const CELL: Color32 = Color32::from_gray(36);
-const CELL_HOVER: Color32 = Color32::from_gray(44);
-const CELL_SELECTED: Color32 = Color32::from_gray(80);
-const CELL_FOCUS: Color32 = Color32::from_gray(104);
-const FOCUS_LINE: Color32 = Color32::from_gray(225);
-/// Labels: quieter than values and controls, but read at better than 5:1 on the panel.
-pub const LABEL: Color32 = Color32::from_gray(150);
-pub const TEXT: Color32 = Color32::from_gray(222);
-
-/// The panel's section titles, a little heavier than the text.
-pub fn title_font() -> FontId {
-    FontId::new(12.5, FontFamily::Name("Title".into()))
-}
-
-/// The names of the panel's settings, between the text and the titles.
-pub fn label_family() -> FontFamily {
-    FontFamily::Name("Label".into())
-}
-
-pub fn style(ctx: &egui::Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    #[cfg(target_os = "macos")]
-    if let Ok(sf) = std::fs::read("/System/Library/Fonts/SFNS.ttf") {
-        let sf = egui::FontData::from_owned(sf);
-        for (name, weight) in [("SF", 400.0), ("SF Label", 430.0), ("SF Title", 500.0)] {
-            let mut tweak = egui::FontTweak::default();
-            tweak.coords.push(b"wght", weight);
-            tweak.coords.push(b"opsz", 17.0);
-            fonts.font_data.insert(name.into(), std::sync::Arc::new(sf.clone().tweak(tweak)));
-        }
-    }
-    let rest = fonts.families[&FontFamily::Proportional].clone();
-    for (family, face) in [(FontFamily::Proportional, "SF"), (label_family(), "SF Label"), (title_font().family, "SF Title")] {
-        let faces = fonts.font_data.contains_key(face).then(|| face.to_string()).into_iter().chain(rest.iter().cloned()).collect();
-        fonts.families.insert(family, faces);
-    }
-    ctx.set_fonts(fonts);
-    let mut v = egui::Visuals::dark();
-    v.panel_fill = Color32::from_gray(34);
-    v.window_fill = Color32::from_gray(40);
-    v.extreme_bg_color = Color32::from_gray(26);
-    v.faint_bg_color = Color32::from_gray(38);
-    v.selection.bg_fill = Color32::from_gray(96);
-    v.selection.stroke = Stroke::new(1.0f32, Color32::from_gray(230));
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0f32, Color32::from_gray(44));
-    v.widgets.inactive.weak_bg_fill = Color32::from_gray(50);
-    v.widgets.inactive.bg_fill = Color32::from_gray(60);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0f32, Color32::from_gray(205));
-    v.widgets.hovered.weak_bg_fill = Color32::from_gray(64);
-    v.widgets.hovered.bg_stroke = Stroke::NONE;
-    v.widgets.active.weak_bg_fill = Color32::from_gray(78);
-    v.widgets.active.bg_stroke = Stroke::NONE;
-    v.widgets.open.weak_bg_fill = Color32::from_gray(64);
-    for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
-        w.corner_radius = CornerRadius::same(4);
-        w.expansion = 0.0;
-    }
-    v.window_corner_radius = CornerRadius::same(10);
-    v.menu_corner_radius = CornerRadius::same(7);
-    v.window_stroke = Stroke::new(1.0f32, Color32::from_gray(56));
-    v.window_shadow = egui::Shadow { offset: [0, 8], blur: 28, spread: 0, color: Color32::from_black_alpha(110) };
-    v.popup_shadow = egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: Color32::from_black_alpha(90) };
-    v.hyperlink_color = Color32::from_gray(200);
-    // egui's plain text is 4.4:1 on the dialogs' fill; a little brighter reads comfortably
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0f32, Color32::from_gray(176));
-    ctx.set_visuals(v);
-    ctx.global_style_mut(|s| {
-        s.spacing.item_spacing = vec2(6.0, 5.0);
-        s.spacing.button_padding = vec2(10.0, 3.0);
-        s.spacing.interact_size.y = 22.0;
-        s.spacing.menu_margin = Margin::same(5);
-        s.text_styles.insert(egui::TextStyle::Body, FontId::proportional(12.5));
-        s.text_styles.insert(egui::TextStyle::Button, FontId::proportional(12.5));
-        s.text_styles.insert(egui::TextStyle::Small, FontId::proportional(11.0));
-        s.text_styles.insert(egui::TextStyle::Heading, FontId::proportional(15.0));
-        s.interaction.tooltip_delay = 0.6;
-        s.animation_time = 0.1;
-    });
-}
+use egui::{pos2, vec2, Align2, Button, Color32, CornerRadius, CursorIcon, FontId, Key, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 
 /// A row of mutually exclusive choices as one control, each with its key in a tooltip.
 pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T, &str, &str)]) -> egui::Response {
-    egui::Frame::NONE.fill(VIEW_BG).corner_radius(CornerRadius::same(6)).inner_margin(2.0).show(ui, |ui| {
+    egui::Frame::NONE.fill(WELL).corner_radius(BOX_CORNER).inner_margin(2.0).show(ui, |ui| {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             ui.spacing_mut().button_padding.x = 4.0;
@@ -126,9 +45,9 @@ fn uv_within(shown: Rect, full: Rect) -> Rect {
 
 /// A dark label over a picture, with its corner `align` at `at`.
 fn pill(ui: &Ui, at: Pos2, align: Align2, text: &str) {
-    let g = ui.painter().layout_no_wrap(text.into(), FontId::proportional(11.5), Color32::from_gray(230));
+    let g = ui.painter().layout_no_wrap(text.into(), small_font(), STRONG);
     let pill = align.anchor_size(at, g.size() + vec2(16.0, 8.0));
-    ui.painter().rect_filled(pill, CornerRadius::same(5), Color32::from_black_alpha(170));
+    ui.painter().rect_filled(pill, CORNER, SCRIM);
     ui.painter().galley(pill.min + vec2(8.0, 4.0), g, Color32::WHITE);
 }
 
@@ -157,7 +76,7 @@ impl App {
         if has_photos && self.mode != Mode::Grid {
             egui::Panel::bottom("filmstrip").exact_size(92.0).frame(egui::Frame::NONE.fill(BAR)).show(ui, |ui| self.filmstrip(ui));
         }
-        let area = egui::CentralPanel::default().frame(egui::Frame::NONE.fill(VIEW_BG)).show(ui, |ui| {
+        let area = egui::CentralPanel::default().frame(egui::Frame::NONE.fill(WELL)).show(ui, |ui| {
             if has_photos {
                 egui::Panel::bottom("status").exact_size(30.0).frame(egui::Frame::NONE.fill(BAR).inner_margin(Margin::symmetric(10, 0))).show(ui, |ui| self.status_bar(ui));
                 egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
@@ -174,7 +93,7 @@ impl App {
                 self.empty(ui);
             }
             if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
-                ui.painter().rect_stroke(ui.max_rect().shrink(3.0), CornerRadius::same(6), Stroke::new(2.0f32, Color32::from_gray(160)), StrokeKind::Inside);
+                ui.painter().rect_stroke(ui.max_rect().shrink(3.0), BOX_CORNER, Stroke::new(2.0f32, LABEL), StrokeKind::Inside);
             }
         })
         .response
@@ -210,7 +129,7 @@ impl App {
         }
         ui.add_space(4.0);
         let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-        ui.painter().hline(line.x_range().shrink(4.0), line.center().y, Stroke::new(1.0f32, Color32::from_gray(56)));
+        ui.painter().hline(line.x_range().shrink(4.0), line.center().y, Stroke::new(1.0f32, FILL_1));
         ui.add_space(4.0);
         if self.rail_button(ui, 2, self.reference.shown, true, "Reference (⇧R)") {
             self.run(&ctx, Command::Reference);
@@ -221,9 +140,9 @@ impl App {
     fn rail_button(&self, ui: &mut Ui, icon: usize, on: bool, enabled: bool, tip: &str) -> bool {
         let (rect, r) = ui.allocate_exact_size(vec2(32.0, 32.0), if enabled { Sense::click() } else { Sense::hover() });
         let r = r.on_hover_text(tip);
-        let fill = if on { Color32::from_gray(205) } else if enabled && r.hovered() { Color32::from_gray(58) } else { Color32::TRANSPARENT };
-        let tint = if on { Color32::from_gray(24) } else if enabled { Color32::from_gray(205) } else { Color32::from_gray(88) };
-        ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+        let fill = if on { PLAIN } else if enabled && r.hovered() { FILL_2 } else { Color32::TRANSPARENT };
+        let tint = if on { WELL } else if enabled { PLAIN } else { FILL_3 };
+        ui.painter().rect_filled(rect, CORNER, fill);
         match &self.rail_icons[icon] {
             Some(t) => {
                 let size = vec2(t.aspect_ratio() * 17.0, 17.0);
@@ -231,7 +150,7 @@ impl App {
                 ui.painter().image(t.id(), Rect::from_center_size(rect.center(), size), uv(), tint);
             }
             None => {
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, &tip[..2], FontId::proportional(11.0), tint);
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, &tip[..2], small_font(), tint);
             }
         }
         enabled && r.clicked()
@@ -334,9 +253,15 @@ impl App {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
         let p = ui.painter().with_clip_rect(img);
-        p.vline(x, img.y_range(), Stroke::new(3.0f32, Color32::from_black_alpha(90)));
-        p.vline(x, img.y_range(), Stroke::new(1.0f32, Color32::WHITE));
-        p.circle(pos2(x, img.center().y), 7.0, Color32::from_black_alpha(170), Stroke::new(1.5f32, Color32::WHITE));
+        let (c, r) = (pos2(x, img.center().y), 7.0);
+        // the line stops at the ring, which is clear inside; a dark edge under both keeps them visible on a light picture
+        for (edge, colour) in [(2.0f32, SHADOW), (0.0, Color32::WHITE)] {
+            let ring = Stroke::new(1.5 + edge, colour);
+            let reach = r + ring.width / 2.0;
+            p.vline(x, img.top()..=c.y - reach, Stroke::new(1.0 + edge, colour));
+            p.vline(x, c.y + reach..=img.bottom(), Stroke::new(1.0 + edge, colour));
+            p.circle_stroke(c, r, ring);
+        }
         if named {
             let (left, right) = if self.split_swap { ("After", self.before_name()) } else { (self.before_name(), "After") };
             pill(ui, img.left_top() + vec2(12.0, 12.0), Align2::LEFT_TOP, left);
@@ -350,13 +275,13 @@ impl App {
         let selected = self.lib.selected().contains(&id);
         let focused = self.lib.focus == Some(id);
         let fill = match (selected, focused, hovered) {
-            (true, true, _) => CELL_FOCUS,
-            (true, false, _) => CELL_SELECTED,
-            (false, _, true) => CELL_HOVER,
-            _ => CELL,
+            (true, true, _) => FILL_4,
+            (true, false, _) => FILL_3,
+            (false, _, true) => FILL_1,
+            _ => RAISED,
         };
         let p = ui.painter();
-        p.rect_filled(cell, CornerRadius::same(4), fill);
+        p.rect_filled(cell, CORNER, fill);
         let name_h = if named { 22.0 } else { 0.0 };
         let body = Rect::from_min_max(cell.min, pos2(cell.max.x, cell.max.y - name_h));
         let inner = body.shrink(if self.fill { 4.0 } else { cell.width().min(cell.height()) * 0.07 });
@@ -379,11 +304,11 @@ impl App {
             Status::Loading => egui::Spinner::new().size(16.0).color(LABEL).paint_at(ui, Rect::from_center_size(inner.center(), vec2(16.0, 16.0))),
         }
         if named {
-            let colour = if selected { TEXT } else { LABEL };
+            let colour = if selected { STRONG } else { LABEL };
             let y = cell.max.y - name_h / 2.0 - 4.0;
             let mark = self.film_mark.as_ref().filter(|_| item.look.is_some()).map(|t| (t.id(), t.aspect_ratio() * 11.0));
             let badge_w = mark.map_or(0.0, |(_, w)| w + 6.0);
-            let mut job = LayoutJob::simple_singleline(item.title(), FontId::proportional(11.0), colour);
+            let mut job = LayoutJob::simple_singleline(item.title(), small_font(), colour);
             job.wrap = TextWrapping::truncate_at_width(inner.width() - badge_w);
             let name = ui.fonts_mut(|f| f.layout_job(job));
             ui.painter().galley(pos2(inner.min.x, y - name.size().y / 2.0), name, colour);
@@ -392,7 +317,7 @@ impl App {
             }
         }
         if focused && selected {
-            ui.painter().rect_stroke(cell, CornerRadius::same(4), Stroke::new(1.5f32, FOCUS_LINE), StrokeKind::Inside);
+            ui.painter().rect_stroke(cell, CORNER, Stroke::new(1.5f32, STRONG), StrokeKind::Inside);
         }
         self.star(ui, id, cell);
     }
@@ -407,7 +332,7 @@ impl App {
         let at = Rect::from_center_size(cell.right_top() + vec2(-12.0, 12.0), vec2(18.0, 18.0));
         let r = ui.interact(at, egui::Id::unique(("star", id)), Sense::click()).on_hover_text("S");
         let colour = if starred || r.hovered() { Color32::WHITE } else { LABEL };
-        ui.painter().text(at.center(), Align2::CENTER_CENTER, if starred { "★" } else { "☆" }, FontId::proportional(13.0), colour);
+        ui.painter().text(at.center(), Align2::CENTER_CENTER, if starred { "★" } else { "☆" }, body_font(), colour);
         if r.clicked() {
             self.lib.toggle_starred(&[id]);
         }
@@ -539,7 +464,7 @@ impl App {
             }
             self.divider(ui, id, img, false);
             if focused && ids.len() > 1 {
-                ui.painter().rect_stroke(img.expand(2.0), CornerRadius::ZERO, Stroke::new(1.5f32, FOCUS_LINE), StrokeKind::Middle);
+                ui.painter().rect_stroke(img.expand(2.0), CornerRadius::ZERO, Stroke::new(1.5f32, STRONG), StrokeKind::Middle);
             }
         }
     }

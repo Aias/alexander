@@ -3,10 +3,10 @@
 //! look files in the app's data folder, each with a description if it was given one.
 //! Resting the pointer on one shows it on the focused photo without giving it.
 
-use super::views::{LABEL, TEXT};
+use super::theme::{body_font, CORNER, LABEL, STRONG};
 use super::{controls, session, App};
 use alexander_studio::params::{Repro, Settings};
-use egui::{vec2, Align2, Button, CornerRadius, FontId, Key, Sense, TextEdit, Ui};
+use egui::{vec2, Align2, Button, Key, Sense, TextEdit, Ui};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -85,10 +85,10 @@ impl App {
             for p in &self.presets {
                 let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
                 if r.hovered() {
-                    ui.painter().rect_filled(rect, CornerRadius::same(4), ui.visuals().widgets.hovered.weak_bg_fill);
+                    ui.painter().rect_filled(rect, CORNER, ui.visuals().widgets.hovered.weak_bg_fill);
                     self.preview_wanted = focus.map(|f| (f, p.look.clone()));
                 }
-                ui.painter().text(rect.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, &p.name, FontId::proportional(12.5), if r.hovered() { TEXT } else { LABEL });
+                ui.painter().text(rect.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, &p.name, body_font(), if r.hovered() { STRONG } else { LABEL });
                 let r = if p.description.is_empty() { r } else { r.on_hover_text(&p.description) };
                 if r.clicked() {
                     apply = Some(p.look.clone());

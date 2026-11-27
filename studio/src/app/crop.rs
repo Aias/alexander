@@ -3,11 +3,13 @@
 //! the photo. Dragging inside the frame slides the photo under it, a pinch sizes the photo
 //! under it, and dragging just outside a corner of the frame turns the photo under it.
 
-use super::views::{from_px, px, uv, LABEL, TEXT};
+use super::theme::{LABEL, SCRIM, SHADOW, STRONG};
+use super::views::{from_px, px, uv};
 use super::{controls, App, Mode};
 use alexander_studio::engine::Canvas;
 use alexander_studio::library::Id;
 use alexander_studio::params::Crop;
+use egui::emath::GuiRounding;
 use egui::{pos2, vec2, Color32, CursorIcon, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 
 /// The whole photo, level.
@@ -223,18 +225,20 @@ impl App {
             ui.painter().image(t, shown, uv(), Color32::WHITE);
         }
         let to_screen = |x: f64, y: f64| area.center() + (pos2(x as f32 * w, y as f32 * h) - mid) * z;
-        let frame = Rect::from_min_max(to_screen(e.crop.left, e.crop.top), to_screen(e.crop.right, e.crop.bottom));
+        let frame = Rect::from_min_max(to_screen(e.crop.left, e.crop.top), to_screen(e.crop.right, e.crop.bottom)).round_to_pixels(ppp);
         let p = ui.painter().with_clip_rect(rect);
-        let shade = Color32::from_black_alpha(150);
         for r in [Rect::from_min_max(rect.min, pos2(rect.max.x, frame.min.y)), Rect::from_min_max(pos2(rect.min.x, frame.max.y), rect.max), Rect::from_min_max(pos2(rect.min.x, frame.min.y), pos2(frame.min.x, frame.max.y)), Rect::from_min_max(pos2(frame.max.x, frame.min.y), pos2(rect.max.x, frame.max.y))] {
-            p.rect_filled(r, 0.0, shade);
+            p.rect_filled(r, 0.0, SCRIM);
         }
         for i in 1..3 {
             let t = i as f32 / 3.0;
             p.vline(frame.left() + frame.width() * t, frame.y_range(), Stroke::new(1.0f32, Color32::from_white_alpha(70)));
             p.hline(frame.x_range(), frame.top() + frame.height() * t, Stroke::new(1.0f32, Color32::from_white_alpha(70)));
         }
-        p.rect_stroke(frame, 0.0, Stroke::new(1.0f32, TEXT), StrokeKind::Outside);
+        // a dark edge under the line keeps it a line on a light picture, where it would merge with the picture and leave the handles looking off it
+        for (edge, colour) in [(2.0f32, SHADOW), (0.0, STRONG)] {
+            p.rect_stroke(frame, 0.0, Stroke::new(1.0 + edge, colour), StrokeKind::Middle);
+        }
         let ratio = self.kept_ratio(&e, fw, fh);
         let corners = [frame.left_top(), frame.right_top(), frame.left_bottom(), frame.right_bottom()];
         let near = |p: Pos2| !frame.contains(p) && corners.iter().any(|c| c.distance(p) < 36.0);
@@ -276,7 +280,7 @@ impl App {
         for (sx, sy) in HANDLES {
             let at = pos2(frame.center().x + sx as f32 * frame.width() / 2.0, frame.center().y + sy as f32 * frame.height() / 2.0);
             let r = ui.interact(Rect::from_center_size(at, vec2(16.0, 16.0)), handle(sx, sy), Sense::drag());
-            p.rect_filled(Rect::from_center_size(at, vec2(7.0, 7.0)), 1.0, if r.hovered() || r.dragged() { Color32::WHITE } else { LABEL });
+            p.rect_filled(Rect::from_center_size(at, vec2(7.0, 7.0)).round_to_pixels(ppp), 0.0, if r.hovered() || r.dragged() { Color32::WHITE } else { LABEL });
             if r.hovered() || r.dragged() {
                 ui.ctx().set_cursor_icon(match (sx, sy) {
                     (0, _) => CursorIcon::ResizeVertical,
@@ -341,10 +345,10 @@ fn turn_cursor(ctx: &egui::Context, at: Pos2, out: Vec2) {
         let side = along.rot90() * 3.5;
         vec![tip + along * 4.0, tip - along * 1.5 + side, tip - along * 1.5 - side]
     });
-    for (width, colour) in [(3.5f32, Color32::from_black_alpha(160)), (1.5, Color32::WHITE)] {
+    for (width, colour) in [(3.5f32, SCRIM), (1.5, Color32::WHITE)] {
         p.add(Shape::line(arc.clone(), Stroke::new(width, colour)));
     }
     for head in heads {
-        p.add(Shape::convex_polygon(head, Color32::WHITE, Stroke::new(1.0f32, Color32::from_black_alpha(160))));
+        p.add(Shape::convex_polygon(head, Color32::WHITE, Stroke::new(1.0f32, SCRIM)));
     }
 }

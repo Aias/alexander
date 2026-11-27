@@ -1,9 +1,10 @@
 //! The window's chrome: the toolbar, the status bar under the view, and the dialogs.
 
-use super::views::{segmented, LABEL};
+use super::theme::{body_font, FILL_4, LABEL, STRONG};
+use super::views::segmented;
 use super::{controls, paths, App, Command, Compare, Dialog, Mode, SizeChoice};
 use alexander_studio::export::Format;
-use egui::{vec2, Align, Align2, Button, FontId, Key, Layout, Margin, Rect, RichText, Ui};
+use egui::{vec2, Align, Align2, Button, Key, Layout, Margin, Rect, RichText, Ui};
 
 const DIALOG_BUTTON: egui::Vec2 = vec2(84.0, 26.0);
 
@@ -143,7 +144,7 @@ impl App {
 
     pub(super) fn empty(&mut self, ui: &mut Ui) {
         let c = ui.max_rect().center();
-        let big = |text: &str| Button::new(RichText::new(text).size(14.0)).min_size(vec2(168.0, 34.0));
+        let big = |text: &str| Button::new(RichText::new(text).heading()).min_size(vec2(168.0, 34.0));
         let row = Rect::from_center_size(c, vec2(if cfg!(target_os = "macos") { 346.0 } else { 168.0 }, 34.0));
         ui.scope_builder(egui::UiBuilder::new().max_rect(row).layout(Layout::left_to_right(Align::Center)), |ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
@@ -155,7 +156,7 @@ impl App {
                 self.photos_dialog();
             }
         });
-        ui.painter().text(c + vec2(0.0, 36.0), Align2::CENTER_CENTER, "or drop photos and folders here", FontId::proportional(12.0), LABEL);
+        ui.painter().text(c + vec2(0.0, 36.0), Align2::CENTER_CENTER, "or drop photos and folders here", body_font(), LABEL);
     }
 
     pub(super) fn export_window(&mut self, ctx: &egui::Context) {
@@ -165,7 +166,7 @@ impl App {
         let (mut go, mut cancel, mut choose) = (false, false, None);
         let modal = egui::Modal::new(egui::Id::unique("export")).frame(dialog_frame(ctx)).show(ctx, |ui| {
             ui.set_width(340.0);
-            ui.heading(if n == 1 { "Export 1 Photo".to_string() } else { format!("Export {n} Photos") });
+            ui.label(RichText::new(if n == 1 { "Export 1 Photo".to_string() } else { format!("Export {n} Photos") }).heading().color(STRONG));
             ui.add_space(12.0);
             egui::Grid::new("export").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
                 ui.label("Folder");
@@ -206,7 +207,7 @@ impl App {
                 ui.end_row();
             });
             dialog_buttons(ui, |ui| {
-                go = ui.add_enabled(ready, Button::new("Export").min_size(DIALOG_BUTTON).fill(egui::Color32::from_gray(92))).clicked();
+                go = ui.add_enabled(ready, Button::new("Export").min_size(DIALOG_BUTTON).fill(FILL_4)).clicked();
                 cancel = ui.add(Button::new("Cancel").min_size(DIALOG_BUTTON)).clicked();
             });
         });
