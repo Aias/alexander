@@ -3,7 +3,9 @@
 //! every patch in reading order. Of two, the first steps across the strip and the second down
 //! it. Each patch looks at the photo as Detail does, at its zoom and about its centre, so a
 //! strip made at 100% shows grain and softness. The patch under the pointer shows its values,
-//! and a click on it gives them to the selected photos.
+//! and a click on it gives them to the selected photos. A double click gives them and puts
+//! the strip away, as it applies a profile and closes the browser in Lightroom's Profile
+//! Browser.
 
 use super::controls::{fraction, value_at};
 use super::theme::{SHADOW, STRONG};
@@ -74,10 +76,16 @@ impl App {
             let values: Vec<String> = strip.iter().enumerate().map(|(j, k)| format!("{} {:.*}", k.label, k.decimals, value(j, i))).collect();
             pill(ui, from_px(patch(i), ppp).left_top() + vec2(6.0, 6.0), Align2::LEFT_TOP, &values.join("\n"));
         }
-        if let Some(i) = under(resp.interact_pointer_pos()).filter(|&i| resp.clicked() && looks[i] != look) {
-            let ids = self.lib.selection();
-            self.lib.checkpoint(&ids);
-            self.lib.apply_change(&ids, &look, &looks[i]);
+        if let Some(i) = under(resp.interact_pointer_pos()).filter(|_| resp.clicked()) {
+            if looks[i] != look {
+                let ids = self.lib.selection();
+                self.lib.checkpoint(&ids);
+                self.lib.apply_change(&ids, &look, &looks[i]);
+            } else if resp.double_clicked() || resp.triple_clicked() {
+                // a repeated click on the patch whose values are given. A click close after a
+                // click on another patch gives its own values first and leaves the strip up
+                self.test_strip.clear();
+            }
         }
     }
 }

@@ -197,9 +197,11 @@ the setting off.
 
 An outline marks the patch nearest the photo's current values. Resting the pointer on a
 patch shows its values, and clicking the patch gives them to every selected photo, as one
-step for undo. Each patch looks at the photo as Detail does. At Fit a patch shows the whole
-photo, for judging tones. At 100% (Z, or ⌘1) a patch shows the middle of the view pixel for
-pixel, for judging grain and softness, and scrolling or dragging moves every patch together.
+step for undo. Double-clicking a patch gives its values and puts the strip away, as a double
+click applies a profile and closes the browser in Lightroom's Profile Browser. Each patch
+looks at the photo as Detail does. At Fit a patch shows the whole photo, for judging tones.
+At 100% (Z, or ⌘1) a patch shows the middle of the view pixel for pixel, for judging grain
+and softness, and scrolling or dragging moves every patch together.
 Esc puts the strip away, as does leaving Detail. Choosing a setting for the strip from Grid
 or Survey opens Detail. Grid, Minutes and Page size have no switch.
 
