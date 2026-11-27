@@ -124,13 +124,14 @@ the menu; plain keys go to the window, which leaves them to text being typed.
 | Y | Split before and after |
 | J | Mark clipped highlights red and clipped shadows blue |
 | R | Crop the focused photo; Return or R again keeps the crop, Esc leaves it |
+| Space and drag | Detail, at Fit: slide a cropped photo under its crop |
 | ⇧⌘C / ⇧⌘V | Copy and paste a look |
 | ⇧⌘R | Reset the film settings of the selection to the defaults |
 | ⌘Z / ⇧⌘Z | Undo and redo changes to looks |
 | Z, or click | Detail: fit, or 100% about the point clicked |
 | ⌘0 / ⌘1 | Detail: fit / 100% |
 | ⌘+ / ⌘− | Zoom in and out; in the library, larger and smaller thumbnails |
-| Pinch, or scroll with ⌘ | Detail: zoom about the pointer |
+| Pinch, or scroll with ⌘ | Detail: zoom about the pointer. Crop: size the photo under the frame |
 | Scroll or drag | Detail: move a zoomed photo |
 | Tab | Show or hide the panel |
 
@@ -141,9 +142,14 @@ border and leaves it in the picture; Strip does the same and shows and exports o
 picture inside, in every view and thumbnail, without rendering again; Off does not look.
 
 Crop (R, or Crop in the rail) works on one photo at a time, in Detail, and holds the panel
-while it lasts. It shows the whole photo with a level frame over it: drag the frame or its
-handles to move or size it. Dragging just outside a corner, where the pointer becomes a
-curved arrow, turns the photo under the frame, as does Straighten, up to 45° either way.
+while it lasts. It shows a level frame at the middle of the view, as large as fits, with
+the photo under it and the part outside the frame darkened. The frame stays in place and
+the photo moves under it, as in Photos and Lightroom. Drag inside the frame to slide the
+photo. Pinch, or scroll with ⌘, to make the photo larger or smaller about the pointer.
+Drag a handle to size the frame: the photo lies still while the handle is held, and the
+view centres on the frame again when the handle is let go. Dragging just outside a corner,
+where the pointer becomes a curved arrow, turns the photo about the middle of the frame,
+as does Straighten, up to 45° either way.
 Moving to another photo in Detail gives the photo left its crop and goes on to crop the next. The frame
 keeps the photo's own aspect unless another one is chosen, or Free, and never leaves the
 photo, shrinking when a turn would take a corner off it. Return, R or Done keeps the crop
@@ -151,6 +157,11 @@ as one step undo takes back; Esc or Cancel leaves the photo as it was. The crop 
 the look, so exports, thumbnails and the histogram show it, but presets and pasted looks
 leave each photo's own crop alone, and Reset takes it away. A stripped border is a crop
 of the picture inside it, at no angle.
+
+A cropped photo also slides under its crop without opening Crop. In Detail, with the photo
+at Fit, hold Space and drag. The photo moves as it does inside the frame in Crop, and undo
+takes the whole drag back as one step. With the photo zoomed in, a drag moves the view and
+the crop stays as it is.
 
 Presets head the panel, closed until opened. Resting the pointer on one shows it on the
 focused photo, with its description, and a click gives it to every selected photo, in one
