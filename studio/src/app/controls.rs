@@ -308,11 +308,11 @@ fn strip_switch(ui: &mut Ui, row: Rect, strip: &mut Vec<Knob>, knob: Knob) {
     if place.is_none() && !over {
         return;
     }
-    let rect = Rect::from_center_size(pos2(row.left() + LABEL_W - 2.0, row.center().y), vec2(14.0, 14.0));
+    let rect = Rect::from_center_size(pos2(row.left() + LABEL_W - 7.0, row.center().y), vec2(14.0, 14.0));
     let r = ui.interact(rect, egui::Id::unique(("test strip", knob.label)), Sense::click()).on_hover_text("T");
     let down = place.unwrap_or(strip.len().min(1)) == 1;
     let colour = if r.hovered() { Color32::WHITE } else if place.is_some() { STRONG } else { LABEL };
-    for step in [-3.5, 0.0, 3.5] {
+    for step in [-4.0, 0.0, 4.0] {
         let mark = rect.center() + if down { vec2(0.0, step) } else { vec2(step, 0.0) };
         ui.painter().rect_filled(Rect::from_center_size(mark, vec2(2.5, 2.5)), CornerRadius::ZERO, colour);
     }
@@ -456,14 +456,14 @@ fn knobs(ui: &mut Ui, s: &mut Settings, bordered: bool, strip: &mut Vec<Knob>) {
     });
     section(ui, "Lens", true, None, |ui| {
         Knob::new("Softness", "Blur on the film, µm", |s| &mut s.lens_um, 0.0..=40.0, 1).show(ui, s, strip);
-        Knob::new("Softness shape", "2 is a Gaussian; lower adds a long faint skirt", |s| &mut s.lens_exponent, 0.6..=2.0, 2).show(ui, s, strip);
+        Knob::new("Falloff", "How the softness falls off: 2 is a Gaussian, lower adds a long faint skirt", |s| &mut s.lens_exponent, 0.6..=2.0, 2).show(ui, s, strip);
         Knob::new("Halation", "Glow around bright areas", |s| &mut s.halation, 0.0..=0.2, 2).show(ui, s, strip);
-        Knob::new("Halation width", "µm", |s| &mut s.halation_um, 10.0..=200.0, 0).show(ui, s, strip);
+        Knob::new("Radius", "How far the halation spreads, µm", |s| &mut s.halation_um, 10.0..=200.0, 0).show(ui, s, strip);
     });
     section(ui, "Grain", true, None, |ui| {
         Knob::new("Amount", "Relative to the datasheet", |s| &mut s.grain, 0.0..=3.0, 2).show(ui, s, strip);
         Knob::new("In lights", "Grain kept in light tones", |s| &mut s.grain_light, 0.0..=1.0, 2).show(ui, s, strip);
-        Knob::new("With development", "How grain grows with development", |s| &mut s.grain_dev, 0.0..=2.5, 2).show(ui, s, strip);
+        Knob::new("Growth", "How grain grows with development", |s| &mut s.grain_dev, 0.0..=2.5, 2).show(ui, s, strip);
     });
     let mut edges = !s.no_edge;
     section(ui, "Edge Effects", true, Some(&mut edges), |ui| {
@@ -491,7 +491,7 @@ fn knobs(ui: &mut Ui, s: &mut Settings, bordered: bool, strip: &mut Vec<Knob>) {
             }
             Repro::Book => {
                 let mut auto = s.page_mm.is_none();
-                check(ui, "Page size auto", "From the file's size at the PPI below", &mut auto, d.page_mm.is_none());
+                check(ui, "Auto size", "Page size from the file's size at the PPI below", &mut auto, d.page_mm.is_none());
                 if auto {
                     s.page_mm = None;
                     Knob::new("PPI", "", |s| &mut s.ppi, 72.0..=600.0, 0).show(ui, s, strip);
