@@ -92,6 +92,11 @@ impl Item {
         self.status == Status::Ready
     }
 
+    /// The settings the photo's knobs show: its look, else the look set aside, else the defaults.
+    pub fn settings(&self) -> Settings {
+        self.look.clone().or_else(|| self.stash.clone()).unwrap_or_default()
+    }
+
     /// The file's name, and which copy this is for a virtual copy.
     pub fn title(&self) -> String {
         if self.copy == 0 {

@@ -6,6 +6,9 @@
 //! budget, so GPU memory does not grow with the library. Views ask during layout for what
 //! they want to show; `process` then renders and draws it, most important first, within a
 //! time budget, and the rest catches up over the next frames.
+//!
+//! The patches of a test strip are canvases of one photo under a look each. They render
+//! through the photo's one copy on the GPU, each in turn.
 
 use alexander_studio::engine::{Canvas, Engine, Photo, Stage};
 use alexander_studio::library::{Id, Item, Library};
@@ -26,6 +29,8 @@ const FRAME_BUDGET: Duration = Duration::from_millis(12);
 const HISTOGRAM_BINS: usize = 128;
 /// Look generations of previews start here, above any a photo reaches by editing.
 const PREVIEW_GEN: u64 = 1 << 62;
+/// Look generations of the test strip's patches start here, above any a preview reaches.
+const PATCH_GEN: u64 = 1 << 63;
 
 /// What a histogram counts: the photo, its look generation, whether the photo itself is
 /// shown and whether the default look stands in for it.
@@ -59,9 +64,11 @@ impl Resident {
         w as u64 * h as u64 * (4 + 18 * k * k + 4 * self.photo.has_before() as u64)
     }
 
-    /// Fit to show: the photo as it is, or a render of its look (possibly an older one).
+    /// Fit to show: the photo as it is, or a render of its look or of an older one. A
+    /// render of a patch's look is another picture, fit to show for that patch alone.
     fn showable(&self, item: &Item) -> bool {
-        item.look.is_none() || self.photo.rendered()
+        let patch = |gen: u64| gen >= PATCH_GEN;
+        item.look.is_none() || self.photo.rendered() && (!self.stale(item) || !patch(item.gen) && !self.gen.is_some_and(patch))
     }
 
     fn stale(&self, item: &Item) -> bool {
@@ -97,6 +104,19 @@ impl Surface {
     }
 }
 
+/// What a surface shows of its photo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Part {
+    /// The photo in a view.
+    Canvas,
+    /// The photo in a patch of the test strip.
+    Patch(usize),
+    Thumb,
+}
+
+/// A surface's photo and the part it shows.
+type Slot = (Id, Part);
+
 #[derive(Clone, Copy)]
 enum Want {
     Thumb,
@@ -110,6 +130,8 @@ struct Request {
     want: Want,
     size: [u32; 2],
     rank: u8,
+    /// The patch of the test strip whose look the photo is shown under.
+    patch: Option<usize>,
 }
 
 pub struct Tiers {
@@ -119,8 +141,7 @@ pub struct Tiers {
     planners: [Planner; 2],
     proxies: HashMap<Id, Resident>,
     fulls: HashMap<Id, Resident>,
-    thumbs: HashMap<Id, Surface>,
-    canvases: HashMap<Id, Surface>,
+    surfaces: HashMap<Slot, Surface>,
     requests: Vec<Request>,
     prefetch: Vec<(Id, u32)>,
     /// Full grids asked of the loaders and not yet arrived: photo and long edge.
@@ -133,6 +154,8 @@ pub struct Tiers {
     /// A look shown on one photo without being given to it, and the generation it renders as.
     preview: Option<(Id, Settings, u64)>,
     previews: u64,
+    /// The look each patch of the test strip shows and the generation it renders as.
+    patches: Vec<(Settings, u64)>,
     /// Where a view shows the photo itself, a photo with a look shows the default look.
     before_default: bool,
 }
@@ -150,8 +173,7 @@ impl Tiers {
             planners: [Planner::new(), Planner::new()],
             proxies: HashMap::new(),
             fulls: HashMap::new(),
-            thumbs: HashMap::new(),
-            canvases: HashMap::new(),
+            surfaces: HashMap::new(),
             requests: Vec::new(),
             prefetch: Vec::new(),
             loading: HashSet::new(),
@@ -161,6 +183,7 @@ impl Tiers {
             histogram: None,
             preview: None,
             previews: 0,
+            patches: Vec::new(),
             before_default: false,
         }
     }
@@ -208,12 +231,20 @@ impl Tiers {
         self.before_default && photo_shown && item.look.is_some()
     }
 
-    /// `item` as its renders show it: with the previewed look when it is the photo previewed.
-    fn shown_item<'a>(&self, item: &'a Item) -> Cow<'a, Item> {
-        match &self.preview {
-            Some((id, look, gen)) if *id == item.id => Cow::Owned(Item { look: Some(look.clone()), gen: *gen, ..item.clone() }),
-            _ => Cow::Borrowed(item),
-        }
+    /// `item` as a render shows it: under the look of `patch` of the test strip, or with
+    /// the previewed look when it is the photo previewed.
+    fn shown_item<'a>(&self, item: &'a Item, patch: Option<usize>) -> Cow<'a, Item> {
+        let (look, gen) = match (patch.and_then(|i| self.patches.get(i)), &self.preview) {
+            (Some((look, gen)), _) => (look, gen),
+            (None, Some((id, look, gen))) if *id == item.id => (look, gen),
+            _ => return Cow::Borrowed(item),
+        };
+        Cow::Owned(Item { look: Some(look.clone()), gen: *gen, ..item.clone() })
+    }
+
+    /// The texture of a surface that has been drawn.
+    fn drawn(&self, slot: Slot) -> Option<TextureId> {
+        self.surfaces.get(&slot).filter(|s| s.key.is_some()).map(|s| s.id)
     }
 
     // ---------- asked for during layout ---------------------------------------------------
@@ -227,8 +258,8 @@ impl Tiers {
         let (sx, sy) = (max[0] as f32 / pw as f32, max[1] as f32 / ph as f32);
         let s = if fill { sx.max(sy) } else { sx.min(sy) };
         let size = [((pw as f32 * s).round() as u32).clamp(1, pw.max(1) * 2), ((ph as f32 * s).round() as u32).clamp(1, ph.max(1) * 2)];
-        self.requests.push(Request { id: item.id, want: Want::Thumb, size, rank });
-        (self.thumbs.get(&item.id).filter(|t| t.key.is_some()).map(|t| t.id), size)
+        self.requests.push(Request { id: item.id, want: Want::Thumb, size, rank, patch: None });
+        (self.thumb_tex(item.id), size)
     }
 
     /// `item` drawn into a canvas of `size` physical pixels looking at its full grid as
@@ -238,13 +269,33 @@ impl Tiers {
             return None;
         }
         let grid = self.grid_size(item);
-        self.requests.push(Request { id: item.id, want: Want::Canvas { canvas, grid }, size, rank });
-        self.canvases.get(&item.id).filter(|t| t.key.is_some()).map(|t| t.id)
+        self.requests.push(Request { id: item.id, want: Want::Canvas { canvas, grid }, size, rank, patch: None });
+        self.drawn((item.id, Part::Canvas))
+    }
+
+    /// The patches of a test strip: `item` under each of `looks`, each drawn as `canvas`
+    /// says into a canvas of its own of `size` physical pixels. Returns the texture of each
+    /// patch drawn so far.
+    pub fn test_strip(&mut self, item: &Item, looks: &[Settings], canvas: Canvas, size: [u32; 2]) -> Vec<Option<TextureId>> {
+        let grid = self.grid_size(item);
+        let old = std::mem::take(&mut self.patches);
+        for (i, look) in looks.iter().enumerate() {
+            let gen = match old.get(i) {
+                Some((l, gen)) if l == look => *gen,
+                _ => {
+                    self.previews += 1;
+                    PATCH_GEN + self.previews
+                }
+            };
+            self.patches.push((look.clone(), gen));
+            self.requests.push(Request { id: item.id, want: Want::Canvas { canvas, grid }, size, rank: 0, patch: Some(i) });
+        }
+        (0..looks.len()).map(|i| self.drawn((item.id, Part::Patch(i)))).collect()
     }
 
     /// A thumbnail already drawn, to stand in while a larger picture is made.
     pub fn thumb_tex(&self, id: Id) -> Option<TextureId> {
-        self.thumbs.get(&id).filter(|t| t.key.is_some()).map(|t| t.id)
+        self.drawn((id, Part::Thumb))
     }
 
     /// Load the full grid of a photo likely to be shown next, without rendering it.
@@ -272,11 +323,12 @@ impl Tiers {
                 self.engine.release(&mut r.photo);
             }
         }
-        for map in [&mut self.thumbs, &mut self.canvases] {
-            if let Some(s) = map.remove(&id) {
+        self.surfaces.retain(|slot, s| {
+            if slot.0 == id {
                 self.renderer.write().free_texture(&s.id);
             }
-        }
+            slot.0 != id
+        });
         self.loading.retain(|(i, _)| *i != id);
     }
 
@@ -290,11 +342,10 @@ impl Tiers {
         requests.sort_by_key(|r| r.rank);
         let mut to_load = Vec::new();
         let mut pending = false;
-        let mut full_bytes = 0u64;
         let mut first = true;
         for r in &requests {
             let Some(item) = lib.get(r.id) else { continue };
-            let shown = self.shown_item(item);
+            let shown = self.shown_item(item, r.patch);
             let item = &*shown;
             if item.proxy.is_none() {
                 continue;
@@ -307,7 +358,7 @@ impl Tiers {
                     // a thumbnail already showing the current look needs nothing from the
                     // GPU copy, which can then be let go of under the budget
                     let current = self.thumb_key(item, r.size, before);
-                    if let Some(s) = self.thumbs.get_mut(&item.id).filter(|s| s.key == current) {
+                    if let Some(s) = self.surfaces.get_mut(&(item.id, Part::Thumb)).filter(|s| s.key == current) {
                         s.used = self.frame;
                         if r.rank == 0 {
                             self.touch(Tier::Proxy, item.id);
@@ -320,17 +371,18 @@ impl Tiers {
                     self.draw_thumb(item, r.size, before);
                 }
                 Want::Canvas { canvas, grid } => {
+                    let slot = (item.id, r.patch.map_or(Part::Canvas, Part::Patch));
+                    let canvas = if before || item.look.is_none() { Canvas { source: Canvas::PHOTO, ..canvas } } else { canvas };
                     let long = grid.0.max(grid.1);
-                    // a canvas no larger than the proxy is drawn from the proxy
-                    let wants_full = r.size[0].max(r.size[1]) as f32 > 1.15 * item.proxy.as_ref().map_or(0, |p| p.w.max(p.h)) as f32 || canvas.scale < 1.0;
-                    let current = self.canvas_key(item, if wants_full { Tier::Full } else { Tier::Proxy }, canvas, grid, r.size, before);
-                    if let Some(s) = self.canvases.get_mut(&item.id).filter(|s| s.key == current) {
+                    // a canvas the proxy has pixels enough for is drawn from the proxy
+                    let wants_full = (long as f32) > canvas.scale * 1.15 * item.proxy.as_ref().map_or(0, |p| p.w.max(p.h)) as f32 || canvas.scale < 1.0;
+                    let current = self.canvas_key(item, if wants_full { Tier::Full } else { Tier::Proxy }, canvas, grid, r.size);
+                    if let Some(s) = self.surfaces.get_mut(&slot).filter(|s| s.key == current) {
                         s.used = self.frame;
                         // a full grid is read from disk again if let go, so the one on
                         // screen is kept, as is the proxy of the photo being edited
                         if let Some(f) = self.fulls.get_mut(&item.id).filter(|_| wants_full) {
                             f.used = self.frame;
-                            full_bytes += f.bytes();
                         }
                         if r.rank == 0 {
                             self.touch(Tier::Proxy, item.id);
@@ -338,19 +390,17 @@ impl Tiers {
                         continue;
                     }
                     let mut tier = Tier::Proxy;
-                    let default = self.shows_default(item, before || canvas.source != Canvas::RENDER);
+                    let default = self.shows_default(item, canvas.source != Canvas::RENDER);
                     if wants_full {
                         let have = self.fulls.get(&item.id).map(|f| f.photo.size());
-                        let fits = full_bytes + (long as u64 * long as u64 * 14) < FULL_BUDGET;
+                        let fits = self.fulls_needed() + (long as u64 * long as u64 * 14) < FULL_BUDGET;
                         if have.is_some_and(|s| s.0.max(s.1) == long) || (have.is_some() && fits) {
                             if have.is_some_and(|s| s.0.max(s.1) != long) && !self.loading.contains(&(item.id, long)) {
                                 to_load.push((item.id, long));
                             }
                             let ok = self.ensure(Tier::Full, item, may_render, r.rank == 0, default);
                             pending |= !ok;
-                            let f = &self.fulls[&item.id];
-                            full_bytes += f.bytes();
-                            if f.showable(item) {
+                            if self.fulls[&item.id].showable(item) {
                                 tier = Tier::Full;
                             }
                         } else if fits && !self.loading.contains(&(item.id, long)) {
@@ -363,13 +413,13 @@ impl Tiers {
                     if tier == Tier::Proxy {
                         pending |= !self.ensure(Tier::Proxy, item, may_render, r.rank == 0, default);
                     }
-                    self.draw_canvas(item, tier, canvas, grid, r.size, before);
+                    self.draw_canvas(item, slot, tier, canvas, grid, r.size);
                 }
             }
         }
         for (id, long) in std::mem::take(&mut self.prefetch) {
             let have = self.fulls.get(&id).is_some_and(|f| f.photo.size().0.max(f.photo.size().1) == long);
-            let room = full_bytes + 2 * (long as u64 * long as u64 * 14) < FULL_BUDGET;
+            let room = self.fulls_needed() + 2 * (long as u64 * long as u64 * 14) < FULL_BUDGET;
             if !have && room && !self.loading.contains(&(id, long)) && !to_load.contains(&(id, long)) {
                 to_load.push((id, long));
             }
@@ -377,6 +427,11 @@ impl Tiers {
         self.evict();
         self.frame += 1;
         (to_load, pending)
+    }
+
+    /// Bytes of the full grids needed so far this frame.
+    fn fulls_needed(&self) -> u64 {
+        self.fulls.values().filter(|f| f.used == self.frame).map(|f| f.bytes()).sum()
     }
 
     /// Put `item` on the GPU at `tier` (the proxy is uploaded on demand; a full grid must
@@ -445,24 +500,20 @@ impl Tiers {
         (texture, view)
     }
 
-    /// Draw into the surface of `id` in `map`, replacing it when the size changed.
-    #[allow(clippy::too_many_arguments)]
-    fn draw_into(&mut self, thumbs: bool, id: Id, tier: Tier, key: DrawKey, canvas: Canvas, view: ViewPlan, filter: wgpu::FilterMode) {
+    /// Draw into the surface of `slot`, replacing it when the size changed.
+    fn draw_into(&mut self, slot: Slot, tier: Tier, key: DrawKey, canvas: Canvas, view: ViewPlan, filter: wgpu::FilterMode) {
         let frame = self.frame;
         let size = key.size;
-        let map = if thumbs { &mut self.thumbs } else { &mut self.canvases };
-        if let Some(s) = map.get_mut(&id) {
+        if let Some(s) = self.surfaces.get_mut(&slot) {
             s.used = frame;
             if s.key.as_ref() == Some(&key) {
                 return;
             }
         }
-        let resized = map.get(&id).is_none_or(|s| s.size != size);
-        if resized {
+        if self.surfaces.get(&slot).is_none_or(|s| s.size != size) {
             let (texture, tview) = self.surface(size);
             let shown = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(wgpu::TextureFormat::Rgba8Unorm), ..Default::default() });
-            let map = if thumbs { &mut self.thumbs } else { &mut self.canvases };
-            match map.get_mut(&id) {
+            match self.surfaces.get_mut(&slot) {
                 Some(s) => {
                     self.renderer.write().update_egui_texture_from_wgpu_texture(&self.device, &shown, filter, s.id);
                     s.texture.destroy();
@@ -472,14 +523,13 @@ impl Tiers {
                 }
                 None => {
                     let tid = self.renderer.write().register_native_texture(&self.device, &shown, filter);
-                    map.insert(id, Surface { texture, view: tview, id: tid, size, key: None, used: frame });
+                    self.surfaces.insert(slot, Surface { texture, view: tview, id: tid, size, key: None, used: frame });
                 }
             }
         }
-        let res = if tier == Tier::Proxy { self.proxies.get_mut(&id) } else { self.fulls.get_mut(&id) };
+        let res = if tier == Tier::Proxy { self.proxies.get_mut(&slot.0) } else { self.fulls.get_mut(&slot.0) };
         let Some(res) = res else { return };
-        let map = if thumbs { &mut self.thumbs } else { &mut self.canvases };
-        let s = map.get_mut(&id).unwrap();
+        let s = self.surfaces.get_mut(&slot).unwrap();
         self.engine.draw(&mut res.photo, &view, &canvas, &s.view, wgpu::TextureFormat::Rgba8UnormSrgb, false);
         s.key = Some(key);
     }
@@ -501,13 +551,12 @@ impl Tiers {
 
     /// The key of a canvas of `item` drawn from a current render at `tier`. A full grid
     /// counts only at the size the look asks for.
-    #[allow(clippy::too_many_arguments)]
-    fn canvas_key(&self, item: &Item, tier: Tier, canvas: Canvas, grid: (u32, u32), size: [u32; 2], before: bool) -> Option<DrawKey> {
+    fn canvas_key(&self, item: &Item, tier: Tier, canvas: Canvas, grid: (u32, u32), size: [u32; 2]) -> Option<DrawKey> {
         let pw = match tier {
             Tier::Proxy => item.proxy.as_ref()?.w,
             Tier::Full => grid.0,
         };
-        let c = scaled(canvas, pw, grid, before || item.look.is_none());
+        let c = scaled(canvas, pw, grid);
         Some(DrawKey { tier, complete: true, before_default: self.shows_default(item, c.source != Canvas::RENDER), gen: item.gen, canvas: canvas_bits(&c), size })
     }
 
@@ -529,24 +578,24 @@ impl Tiers {
         let default = self.shows_default(item, before);
         let key = DrawKey { tier: Tier::Proxy, complete: !res.stale(item) && (!default || res.photo.has_before()), before_default: default, gen: item.gen, canvas: canvas_bits(&canvas), size };
         let view = Self::view_of(res, item);
-        self.draw_into(true, item.id, Tier::Proxy, key, canvas, view, wgpu::FilterMode::Linear);
+        self.draw_into((item.id, Part::Thumb), Tier::Proxy, key, canvas, view, wgpu::FilterMode::Linear);
     }
 
-    fn draw_canvas(&mut self, item: &Item, tier: Tier, canvas: Canvas, grid: (u32, u32), size: [u32; 2], before: bool) {
+    fn draw_canvas(&mut self, item: &Item, slot: Slot, tier: Tier, canvas: Canvas, grid: (u32, u32), size: [u32; 2]) {
         let res = if tier == Tier::Proxy { self.proxies.get(&item.id) } else { self.fulls.get(&item.id) };
         let Some(res) = res else { return };
         if !res.showable(item) {
             // keep showing what was there, if anything
-            if let Some(s) = self.canvases.get_mut(&item.id) {
+            if let Some(s) = self.surfaces.get_mut(&slot) {
                 s.used = self.frame;
             }
             return;
         }
-        let c = scaled(canvas, res.photo.size().0, grid, before || item.look.is_none());
+        let c = scaled(canvas, res.photo.size().0, grid);
         let default = self.shows_default(item, c.source != Canvas::RENDER);
         let key = DrawKey { tier, complete: !res.stale(item) && (!default || res.photo.has_before()), before_default: default, gen: item.gen, canvas: canvas_bits(&c), size };
         let view = Self::view_of(res, item);
-        self.draw_into(false, item.id, tier, key, c, view, wgpu::FilterMode::Nearest);
+        self.draw_into(slot, tier, key, c, view, wgpu::FilterMode::Nearest);
     }
 
     /// Let go of what has not been needed lately, oldest first, down to the budgets.
@@ -569,24 +618,20 @@ impl Tiers {
                 self.engine.release(&mut r.photo);
             }
         }
-        // canvases belong to the views on screen now
-        let gone: Vec<Id> = self.canvases.iter().filter(|(_, s)| s.used + 1 < frame).map(|(id, _)| *id).collect();
-        for id in gone {
-            let s = self.canvases.remove(&id).unwrap();
-            self.renderer.write().free_texture(&s.id);
-        }
-        let mut total: u64 = self.thumbs.values().map(|s| s.bytes()).sum();
-        if total > THUMB_BUDGET {
-            let mut old: Vec<(u64, Id)> = self.thumbs.iter().filter(|(_, s)| s.used + 1 < frame).map(|(id, s)| (s.used, *id)).collect();
-            old.sort();
-            for (_, id) in old {
-                if total <= THUMB_BUDGET {
-                    break;
-                }
-                let s = self.thumbs.remove(&id).unwrap();
-                total -= s.bytes();
-                self.renderer.write().free_texture(&s.id);
+        // canvases and patches belong to the views on screen now, and thumbnails are kept
+        // under their budget
+        let mut total: u64 = self.surfaces.iter().filter(|(slot, _)| slot.1 == Part::Thumb).map(|(_, s)| s.bytes()).sum();
+        let mut old: Vec<(bool, u64, Slot)> = self.surfaces.iter().filter(|(_, s)| s.used + 1 < frame).map(|(slot, s)| (slot.1 == Part::Thumb, s.used, *slot)).collect();
+        old.sort();
+        for (thumb, _, slot) in old {
+            if thumb && total <= THUMB_BUDGET {
+                break;
             }
+            let s = self.surfaces.remove(&slot).unwrap();
+            if thumb {
+                total -= s.bytes();
+            }
+            self.renderer.write().free_texture(&s.id);
         }
     }
 
@@ -621,7 +666,7 @@ impl Tiers {
     /// How often each display value is shown, in `HISTOGRAM_BINS` bins from black to white:
     /// counted on the proxy's render of the look, or on the proxy itself, inside the crop.
     pub fn histogram(&mut self, item: &Item, before: bool) -> Option<&[f32]> {
-        let shown = self.shown_item(item);
+        let shown = self.shown_item(item, None);
         let item = &*shown;
         let source = before || item.look.is_none();
         let default = self.shows_default(item, before);
@@ -646,19 +691,18 @@ impl Tiers {
 
     /// Numbers for the trace: photos on the GPU at each tier and surfaces held.
     pub fn census(&self) -> (usize, usize, usize, usize) {
-        (self.proxies.len(), self.fulls.len(), self.thumbs.len(), self.canvases.len())
+        let thumbs = self.surfaces.keys().filter(|slot| slot.1 == Part::Thumb).count();
+        (self.proxies.len(), self.fulls.len(), thumbs, self.surfaces.len() - thumbs)
     }
 }
 
 /// Width, height and display values, four floats a pixel.
 pub type Display = (u32, u32, Vec<f32>);
 
-/// `canvas`, given in the coordinates of a full grid of `grid`, for a photo `pw` wide;
-/// showing the photo itself throughout when `photo`.
-fn scaled(canvas: Canvas, pw: u32, grid: (u32, u32), photo: bool) -> Canvas {
+/// `canvas`, given in the coordinates of a full grid of `grid`, for a photo `pw` wide.
+fn scaled(canvas: Canvas, pw: u32, grid: (u32, u32)) -> Canvas {
     let k = pw as f32 / grid.0 as f32;
-    let source = if photo { Canvas::PHOTO } else { canvas.source };
-    Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, source, ..canvas }
+    Canvas { origin: [canvas.origin[0] * k, canvas.origin[1] * k], scale: canvas.scale * k, ..canvas }
 }
 
 /// The part of a `size` picture of `item` that is shown: the top-left corner and size of its
