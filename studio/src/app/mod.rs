@@ -135,6 +135,9 @@ pub struct App {
     /// A photo whose finished picture is being read back for the clipboard.
     copy_image: Option<(Id, Planner)>,
     clipboard: Option<Settings>,
+    /// Commands chosen from a photo's menu, run once the views are laid out, since they may
+    /// take photos away from the views laying them out.
+    chosen: Vec<Command>,
     /// An edit to the looks is under way (a slider held): one undo step for all of it.
     edit_open: bool,
     /// Detail: None fits the photo; otherwise screen pixels per grid pixel.
@@ -207,6 +210,7 @@ impl App {
             clipping: false,
             copy_image: None,
             clipboard: None,
+            chosen: Vec::new(),
             edit_open: false,
             zoom: None,
             center: [0.5, 0.5],

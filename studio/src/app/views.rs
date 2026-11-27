@@ -182,6 +182,7 @@ impl App {
         self.export_window(ctx);
         self.errors_window(ctx);
         self.reference_ui(ctx, area);
+        actions.append(&mut self.chosen);
         actions
     }
 
@@ -293,11 +294,11 @@ impl App {
         });
     }
 
-    /// A menu entry that runs `c`, enabled when it can run.
+    /// A menu entry that runs `c` after the layout, enabled when it can run.
     pub(super) fn entry(&mut self, ui: &mut Ui, text: &str, keys: &str, c: Command) {
         if ui.add_enabled(self.can(&c), Button::new(text).shortcut_text(keys)).clicked() {
             ui.close();
-            self.run(&ui.ctx().clone(), c);
+            self.chosen.push(c);
         }
     }
 
