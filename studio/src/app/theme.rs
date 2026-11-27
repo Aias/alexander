@@ -29,7 +29,7 @@ pub const PLAIN: Color32 = Color32::from_gray(205);
 pub const STRONG: Color32 = Color32::from_gray(220);
 /// Under a label laid over a picture, and over what a crop leaves out.
 pub const SCRIM: Color32 = Color32::from_black_alpha(160);
-/// Shadows, and the dark edge that keeps the split's white line and ring visible on a light picture.
+/// Shadows, and the dark edge that keeps a light line visible on a light picture: the split and the crop frame.
 pub const SHADOW: Color32 = Color32::from_black_alpha(100);
 
 /// The corner of a control or a cell.
