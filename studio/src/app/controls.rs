@@ -18,6 +18,8 @@ const RAIL: Color32 = Color32::from_gray(66);
 const HANDLE: Color32 = Color32::from_gray(205);
 const RULE: Color32 = Color32::from_gray(44);
 const HISTOGRAM: Color32 = Color32::from_gray(150);
+const VALUE_AT_DEFAULT: Color32 = Color32::from_gray(146);
+const VALUE_CHANGED: Color32 = Color32::from_gray(210);
 const EDGE: Margin = Margin { left: 0, right: 12, top: 0, bottom: 0 };
 
 impl App {
@@ -240,9 +242,7 @@ fn dial(ui: &mut Ui, v: &mut f64, range: RangeInclusive<f64>, default: f64, deci
     let w = ui.available_width() - VALUE_W - ui.spacing().item_spacing.x;
     let r = slider(ui, v, range, w, log);
     ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-    if *v == default {
-        ui.visuals_mut().widgets.inactive.fg_stroke.color = LABEL;
-    }
+    ui.visuals_mut().widgets.inactive.fg_stroke.color = if *v == default { VALUE_AT_DEFAULT } else { VALUE_CHANGED };
     ui.spacing_mut().button_padding.x = 2.0;
     ui.add_sized([VALUE_W, ui.spacing().interact_size.y], DragValue::new(v).speed(speed).custom_formatter(|v, _| format!("{v:.decimals$}")));
     if r.double_clicked() {
