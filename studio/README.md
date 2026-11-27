@@ -27,7 +27,8 @@ picker, with the library's albums and search, and takes any number of photos. Th
 hands each photo over in its original format for a moment only, so the app copies it to
 `~/Library/Caches/studio.alexander.app/Photos`, in a folder per photo. The same photo
 picked again lands in the same place and opens once. Exports of these copies go to
-Pictures unless another folder is chosen. The library shows every photo; click to select, ⌘-click to add
+Pictures unless another folder is chosen. Beside the Open buttons a bar counts the photos
+copied from Photos and then the photos opened, until all of them are in. The library shows every photo; click to select, ⌘-click to add
 or remove one, ⇧-click to select a run. The panel on the right edits the look of every
 selected photo at once. Original shows the photo as it is; Film applies the process.
 Moving a knob changes that knob on all selected photos and leaves their other knobs as

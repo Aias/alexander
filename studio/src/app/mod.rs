@@ -62,7 +62,7 @@ pub enum Mode {
 enum Dialog {
     Open,
     #[cfg(target_os = "macos")]
-    Photos,
+    Photos(photos::Progress),
     ExportFolder,
     SaveLook,
     LoadLook,
@@ -151,7 +151,10 @@ pub struct App {
     grid_cols: usize,
     grid_rows_seen: (usize, usize),
     grid_view_h: f32,
-    opening: usize,
+    /// Imports still looking for photos in the files and folders given.
+    collecting: usize,
+    /// Photos opened, and photos sent to be opened, since none were left opening.
+    opened: (usize, usize),
     pending: bool,
     export_form: Option<ExportForm>,
     export_run: Option<ExportRun>,
@@ -222,7 +225,8 @@ impl App {
             grid_cols: 1,
             grid_rows_seen: (0, 0),
             grid_view_h: 0.0,
-            opening: 0,
+            collecting: 0,
+            opened: (0, 0),
             pending: false,
             export_form: None,
             export_run: None,
@@ -267,9 +271,15 @@ impl App {
     fn import(&mut self, paths: Vec<PathBuf>) {
         self.remember_folders(&paths);
         if !paths.is_empty() {
-            self.opening += 1;
+            self.collecting += 1;
             self.workers.send(Job::Collect(paths));
         }
+    }
+
+    /// Send a photo to be opened, counted in the progress shown by the Open buttons.
+    fn open(&mut self, id: Id, path: PathBuf) {
+        self.opened.1 += 1;
+        self.workers.send(Job::Open { id, path });
     }
 
     fn import_dialog(&mut self) {
@@ -282,7 +292,8 @@ impl App {
 
     #[cfg(target_os = "macos")]
     fn photos_dialog(&mut self) {
-        self.ask(Dialog::Photos, photos::pick(photos_cache()));
+        let (progress, paths) = photos::pick(photos_cache());
+        self.ask(Dialog::Photos(progress), paths);
     }
 
     /// Open a file dialog unless one is already open. rfd begins it as a sheet on the window
@@ -307,7 +318,7 @@ impl App {
                 self.import(paths);
             }
             #[cfg(target_os = "macos")]
-            Dialog::Photos => self.import(paths),
+            Dialog::Photos(_) => self.import(paths),
             Dialog::ExportFolder => {
                 if let (Some(d), Some(form)) = (paths.into_iter().next(), &mut self.export_form) {
                     form.dir_ok = d.is_dir();
@@ -338,7 +349,7 @@ impl App {
         while let Ok(done) = self.workers.rx.try_recv() {
             match done {
                 Done::Collected(paths) => {
-                    self.opening -= 1;
+                    self.collecting -= 1;
                     if self.lib.starred_only() {
                         self.lib.set_starred_only(false);
                     }
@@ -346,8 +357,7 @@ impl App {
                     for p in paths {
                         if let Some(id) = self.lib.add(p.clone()) {
                             first.get_or_insert(id);
-                            self.opening += 1;
-                            self.workers.send(Job::Open { id, path: p });
+                            self.open(id, p);
                         }
                     }
                     if let (Some(id), true) = (first, self.lib.selected().is_empty()) {
@@ -355,7 +365,10 @@ impl App {
                     }
                 }
                 Done::Opened { id, result } => {
-                    self.opening -= 1;
+                    self.opened.0 += 1;
+                    if self.opened.0 == self.opened.1 {
+                        self.opened = (0, 0);
+                    }
                     self.opened(id, result);
                 }
                 Done::Full { id, long, result } => {
@@ -435,8 +448,8 @@ impl App {
             match self.lib.get(id) {
                 None => self.tiers.forget(id),
                 Some(it) if it.status == Status::Loading => {
-                    self.opening += 1;
-                    self.workers.send(Job::Open { id, path: it.path.clone() });
+                    let path = it.path.clone();
+                    self.open(id, path);
                 }
                 Some(_) => {}
             }
@@ -739,7 +752,7 @@ impl App {
     }
 
     fn idle(&self) -> bool {
-        self.opening == 0 && self.workers.queued() == 0 && self.tiers.loading.is_empty() && !self.pending && self.export_run.is_none()
+        self.collecting == 0 && self.opened.1 == 0 && self.workers.queued() == 0 && self.tiers.loading.is_empty() && !self.pending && self.export_run.is_none()
     }
 }
 

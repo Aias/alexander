@@ -30,6 +30,23 @@ impl App {
                 if ui.button("Open from Photos…").on_hover_text("⇧⌘O").clicked() {
                     self.photos_dialog();
                 }
+                let copying = match &self.dialog {
+                    #[cfg(target_os = "macos")]
+                    Some((Dialog::Photos(p), _)) => p.copied().map(|(done, total)| ("Copying", done, total)),
+                    _ => None,
+                };
+                match copying.or((self.opened.1 > 0).then_some(("Opening", self.opened.0, self.opened.1))) {
+                    Some((verb, done, total)) => {
+                        ui.add_space(6.0);
+                        ui.add(egui::ProgressBar::new(done as f32 / total.max(1) as f32).desired_width(70.0).desired_height(5.0));
+                        ui.label(RichText::new(format!("{verb} {} of {total}", (done + 1).min(total))).color(LABEL));
+                    }
+                    None if self.collecting > 0 => {
+                        ui.add_space(6.0);
+                        ui.add(egui::Spinner::new().size(12.0).color(LABEL));
+                    }
+                    None => {}
+                }
                 if self.lib.is_empty() {
                     return;
                 }
@@ -95,7 +112,7 @@ impl App {
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 let starred_only = self.lib.starred_only();
                 self.switch(ui, starred_only, "Starred Only", "", Command::StarredOnly);
-                if self.opening > 0 || self.copy_image.is_some() {
+                if self.copy_image.is_some() {
                     ui.add(egui::Spinner::new().size(12.0).color(LABEL));
                 }
                 let n = self.lib.len();

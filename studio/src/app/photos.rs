@@ -28,12 +28,21 @@ struct Copies {
 }
 
 impl Copies {
+    /// Wake the app at each copy, so its progress shows, and when the last is in.
     fn arrived(&mut self) {
-        if self.picked && self.left == 0 {
-            if let Some(w) = self.waker.take() {
-                w.wake();
-            }
+        if let Some(w) = self.waker.take() {
+            w.wake();
         }
+    }
+}
+
+/// How many of the photos picked have been copied, of how many, once the picker has closed.
+pub struct Progress(Arc<Mutex<Copies>>);
+
+impl Progress {
+    pub fn copied(&self) -> Option<(usize, usize)> {
+        let c = self.0.lock().unwrap();
+        c.picked.then(|| (c.paths.len() - c.left, c.paths.len()))
     }
 }
 
@@ -131,15 +140,20 @@ fn copy(result: &PHPickerResult, i: usize, dir: PathBuf, copies: Arc<Mutex<Copie
 }
 
 /// Show the picker as a sheet on the app's window, and give the copies of the photos picked
-/// once all of them are in `dir`. Nothing is shown until the future is first polled.
-pub async fn pick(dir: PathBuf) -> Vec<PathBuf> {
-    match show(dir) {
-        Some(waiting) => waiting.await,
-        None => Vec::new(),
-    }
+/// once all of them are in `dir`, with how far they have come meanwhile. Nothing is shown
+/// until the future is first polled.
+pub fn pick(dir: PathBuf) -> (Progress, impl Future<Output = Vec<PathBuf>>) {
+    let copies = Arc::new(Mutex::new(Copies::default()));
+    let progress = Progress(copies.clone());
+    (progress, async move {
+        match show(dir, copies) {
+            Some(waiting) => waiting.await,
+            None => Vec::new(),
+        }
+    })
 }
 
-fn show(dir: PathBuf) -> Option<Waiting> {
+fn show(dir: PathBuf, copies: Arc<Mutex<Copies>>) -> Option<Waiting> {
     let mtm = MainThreadMarker::new()?;
     let app = NSApplication::sharedApplication(mtm);
     let parent = app.mainWindow().or_else(|| app.windows().firstObject())?;
@@ -151,7 +165,6 @@ fn show(dir: PathBuf) -> Option<Waiting> {
         config.setPreferredAssetRepresentationMode(PHPickerConfigurationAssetRepresentationMode::Current);
         PHPickerViewController::initWithConfiguration(PHPickerViewController::alloc(mtm), &config)
     };
-    let copies = Arc::new(Mutex::new(Copies::default()));
     let delegate = Delegate::new(mtm, Ivars { copies: copies.clone(), dir });
     // SAFETY: the delegate outlives the picker: the sheet's handler holds it until the sheet ends.
     unsafe { picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };

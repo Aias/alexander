@@ -2,7 +2,6 @@
 //! selected, and how the window showed them. Written down at most once a second while it
 //! changes and when the app quits, and read back when the app starts.
 
-use super::workers::Job;
 use super::{App, Mode};
 use alexander_studio::library::Id;
 use alexander_studio::params::Settings;
@@ -68,8 +67,8 @@ impl App {
         let ids: Vec<Id> = s.photos.into_iter().map(|p| self.lib.restore(p.path, p.copy, p.look, p.stash, p.starred)).collect();
         for &id in &ids {
             if let Some(it) = self.lib.get(id) {
-                self.opening += 1;
-                self.workers.send(Job::Open { id, path: it.path.clone() });
+                let path = it.path.clone();
+                self.open(id, path);
             }
         }
         self.lib.set_starred_only(s.starred_only);
